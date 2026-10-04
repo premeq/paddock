@@ -53,6 +53,16 @@ description = "paddock"
 | `n` `m` | new space, connect machine |
 | `t` `c` `r` `p` `x` `D` | new worktree, new tab, rename, pin, close, delete checkout |
 | `ctrl+b h` | in a pane: back home (`ctrl+b ctrl+b` sends a literal ctrl+b) |
+
+The prefix is `ctrl+b` by default. Change it in `~/.config/paddock/state.json`:
+
+```json
+{ "prefix": "ctrl+a" }
+```
+
+Accepted forms: `ctrl`, `alt`, `shift` plus one character or `space`. If it
+is also your herdr prefix, paddock sees it first inside a pane; send it
+through with the double press.
 | `q` | quit |
 
 Mouse: click selects, click again opens, wheel scrolls.
@@ -64,8 +74,8 @@ Everything goes through herdr's own CLI and socket API, locally and via
 `events.subscribe`; on remotes a small Python bridge over one SSH connection
 forwards the socket, so remotes need only `python3`. Panes stream through
 `herdr terminal session control`: herdr renders to ANSI, paddock replays it
-into its own grid and sends keys, paste, mouse and resizes back. Nothing is
-stored except pins in `~/.config/paddock/state.json`.
+into its own grid and sends keys, paste, mouse and resizes back. Pins and
+settings live in `~/.config/paddock/state.json`.
 
 Limits: opening a pane resizes it to paddock's viewport, like any herdr
 client. herdr's own TUI does not follow paddock's selection.

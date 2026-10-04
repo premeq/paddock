@@ -37,7 +37,7 @@ pub enum Mode {
     Confirm(Confirm),
 }
 
-/// A pane streamed into paddock. `prefix` is set after ctrl+b, waiting for the chord key.
+/// A pane streamed into paddock. `prefix` is set after the prefix key, waiting for the chord key.
 pub struct Attached {
     pub view: PaneView,
     pub machine: String,
@@ -312,14 +312,15 @@ impl App {
     pub fn key(&mut self, k: KeyEvent) -> Effect {
         self.user_moved = true;
         if let Some(a) = &mut self.attached {
-            let is_prefix = k.code == KeyCode::Char('b') && k.modifiers.contains(KeyModifiers::CONTROL);
+            let prefix_key = self.state.prefix_key();
+            let is_prefix = k.code == prefix_key.code && k.modifiers == prefix_key.modifiers;
             if a.prefix {
                 a.prefix = false;
                 match k.code {
                     KeyCode::Char('h') | KeyCode::Char('q') | KeyCode::Esc => self.detach(None),
                     _ if is_prefix => a.view.key(k),
                     _ => {
-                        a.view.key(KeyEvent::new(KeyCode::Char('b'), KeyModifiers::CONTROL));
+                        a.view.key(prefix_key);
                         a.view.key(k);
                     }
                 }
@@ -546,7 +547,7 @@ impl App {
             ws.map(|w| w.label.as_str()).unwrap_or("?"),
             a.pane_id,
             agent.unwrap_or_default(),
-            if a.prefix { " · ctrl+b …" } else { "" }
+            if a.prefix { format!(" · {} …", self.state.prefix) } else { String::new() }
         ))
     }
 

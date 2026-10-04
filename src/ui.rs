@@ -79,7 +79,10 @@ fn draw_attached(f: &mut Frame, area: Rect, app: &mut App) {
         f.buffer_mut(),
         bar,
         bar.y,
-        vec![Span::styled("ctrl+b h → home · ctrl+b ctrl+b → literal ", Style::default().fg(T.dim))],
+        vec![Span::styled(
+            format!("{p} h → home · {p} {p} → literal ", p = app.state.prefix),
+            Style::default().fg(T.dim),
+        )],
     );
 }
 
