@@ -16,7 +16,7 @@ pub struct Theme {
 }
 
 pub const MOCHA: Theme = Theme {
-    bg: Color::Rgb(30, 30, 46),
+    bg: Color::Reset,
     text: Color::Rgb(205, 214, 244),
     sub: Color::Rgb(166, 173, 200),
     dim: Color::Rgb(108, 112, 134),
