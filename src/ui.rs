@@ -134,7 +134,7 @@ fn draw_header(buf: &mut Buffer, area: Rect, app: &App) {
     buf.set_line(area.x, area.y, &Line::from(spans), area.width);
     let right = match app.last_error.as_ref().or(app.notice.as_ref()) {
         Some(e) => Span::styled(format!("{e} "), Style::default().fg(T.red)),
-        None => Span::styled(format!("{} ", app.refreshed_ago()), Style::default().fg(T.dim)),
+        None => Span::styled(format!("{} ", app.health()), Style::default().fg(T.dim)),
     };
     put_right(buf, area, area.y, vec![right]);
 }
@@ -219,11 +219,12 @@ fn draw_tree(buf: &mut Buffer, area: Rect, app: &mut App) {
         }
         spans.push(Span::styled(row.label.clone(), label));
         let left_w: usize = spans.iter().map(|s| s.content.width()).sum();
-        let right_w: usize = row.right.iter().map(|(t, _)| t.width()).sum();
+        let max_right = (list.width as usize * 2 / 5).max(12);
+        let right: Vec<(String, Tone)> = clip_right(&row.right, max_right);
+        let right_w: usize = right.iter().map(|(t, _)| t.width()).sum();
         let avail = (list.width as usize).saturating_sub(right_w + 1);
         buf.set_line(rect.x, y, &Line::from(spans), avail.min(left_w) as u16);
-        let right: Vec<Span> = row
-            .right
+        let right: Vec<Span> = right
             .iter()
             .map(|(t, tn)| {
                 let st = if selected { base } else { base.fg(tone(*tn)) };
@@ -237,6 +238,29 @@ fn draw_tree(buf: &mut Buffer, area: Rect, app: &mut App) {
             .collect();
         put_right(buf, rect, y, right);
     }
+}
+
+fn clip_right(segments: &[(String, Tone)], max: usize) -> Vec<(String, Tone)> {
+    let total: usize = segments.iter().map(|(t, _)| t.width()).sum();
+    if total <= max {
+        return segments.to_vec();
+    }
+    let mut out = Vec::new();
+    let mut left = max.saturating_sub(1);
+    for (t, tone) in segments {
+        if left == 0 {
+            break;
+        }
+        let w = t.width();
+        if w <= left {
+            out.push((t.clone(), *tone));
+            left -= w;
+        } else {
+            out.push((format!("{}…", t.chars().take(left).collect::<String>()), *tone));
+            left = 0;
+        }
+    }
+    out
 }
 
 fn draw_detail(buf: &mut Buffer, area: Rect, app: &App) {

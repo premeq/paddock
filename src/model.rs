@@ -459,7 +459,7 @@ pub fn build_rows(machines: &[Machine], query: &str, filter: Filter, home: &str,
                     Tone::Online,
                 )],
                 Link::Offline => vec![(
-                    format!("○ offline{}", m.error.as_deref().map(|e| format!(" · {e}")).unwrap_or_default()),
+                    format!("○ offline{}", m.error.as_deref().map(|e| format!(" · {}", crate::herdr::short_error(e))).unwrap_or_default()),
                     Tone::Offline,
                 )],
                 Link::Connecting => vec![("○ connecting…".into(), Tone::Dim)],

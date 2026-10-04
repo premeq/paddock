@@ -243,6 +243,26 @@ pub fn fetch_pane_text(machine: &Machine, pane_id: String, tx: Sender<Update>) {
     });
 }
 
+/// Short cause for a machine row; the full text stays in the detail panel.
+pub fn short_error(e: &str) -> &'static str {
+    let l = e.to_lowercase();
+    if l.contains("timedout") || l.contains("timed out") || l.contains("timeout") {
+        "timeout"
+    } else if l.contains("connectionaborted") || l.contains("connectionreset") || l.contains("broken pipe") || l.contains("connection closed") {
+        "connection lost"
+    } else if l.contains("refused") {
+        "refused"
+    } else if l.contains("could not resolve") || l.contains("name or service") || l.contains("nodename") {
+        "dns"
+    } else if l.contains("permission denied") || l.contains("auth") {
+        "auth"
+    } else if l.contains("not found") || l.contains("no such") {
+        "herdr missing"
+    } else {
+        "error"
+    }
+}
+
 pub fn shell_quote(s: &str) -> String {
     if !s.is_empty() && s.bytes().all(|b| b.is_ascii_alphanumeric() || b"-_./:@~".contains(&b)) {
         return s.to_owned();

@@ -157,17 +157,19 @@ impl App {
         self.machines.iter().find(|m| m.id == id)
     }
 
-    pub fn refreshed_ago(&self) -> String {
-        match self.refreshed {
-            Some(t) => {
-                let s = t.elapsed().as_secs();
-                if s < 25 {
-                    "live".into()
-                } else {
-                    format!("stale · {s}s")
-                }
-            }
-            None => "connecting…".into(),
+    /// Header note: empty while everything is fine.
+    pub fn health(&self) -> String {
+        let offline = self.machines.iter().filter(|m| m.link == Link::Offline).count();
+        let local_stale = match self.refreshed {
+            Some(t) if t.elapsed().as_secs() >= 25 => Some(format!("local stale · {}s", t.elapsed().as_secs())),
+            None => Some("connecting…".into()),
+            _ => None,
+        };
+        match (local_stale, offline) {
+            (Some(s), 0) => s,
+            (Some(s), n) => format!("{s} · {n} offline"),
+            (None, 0) => String::new(),
+            (None, n) => format!("{n} offline"),
         }
     }
 

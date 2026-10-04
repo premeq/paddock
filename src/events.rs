@@ -30,7 +30,7 @@ const LIFECYCLE: &[&str] = &[
     "worktree.removed",
 ];
 
-const SLOW_POLL: Duration = Duration::from_secs(20);
+const SLOW_POLL: Duration = Duration::from_secs(10);
 const DEBOUNCE: Duration = Duration::from_millis(150);
 
 /// Keeps one machine fresh: a poller that fetches snapshots, and an event
@@ -200,7 +200,7 @@ impl Stream {
                 };
                 let remote = format!("exec python3 -c {} {}", shell_quote(BRIDGE), shell_quote(&sock));
                 Command::new("ssh")
-                    .args(["-o", "BatchMode=yes", "-o", "ConnectTimeout=5", "-o", "ServerAliveInterval=15", "-S", "none", target, &remote])
+                    .args(["-o", "BatchMode=yes", "-o", "ConnectTimeout=5", "-o", "ServerAliveInterval=10", "-o", "ServerAliveCountMax=2", "-S", "none", target, &remote])
                     .stdin(Stdio::piped())
                     .stdout(Stdio::piped())
                     .stderr(Stdio::null())
