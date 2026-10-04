@@ -424,13 +424,21 @@ fn detail_lines<'a>(app: &'a App, row: &'a crate::model::Row, right_w: usize) ->
     (facts, extra)
 }
 
-/// Last meaningful screen lines: drops blank lines and pure chrome (rules, boxes).
+/// Last meaningful screen lines: cuts the agent's input box and status bar at
+/// the bottom, then drops blank lines and pure chrome (rules, boxes).
 fn screen_tail(text: &str, n: usize) -> Vec<&str> {
+    let mut lines: Vec<&str> = text.lines().collect();
+    let prompt = |l: &str| matches!(l.trim_start().chars().next(), Some('❯' | '›' | '>'));
+    if let Some(ix) = lines.iter().rposition(|l| prompt(l)) {
+        if ix + 10 >= lines.len() {
+            lines.truncate(ix);
+        }
+    }
     let chrome = |l: &str| {
         let t = l.trim();
-        t.is_empty() || t.chars().all(|c| matches!(c, '─' | '━' | '│' | '╭' | '╮' | '╰' | '╯' | '┌' | '┐' | '└' | '┘' | '═' | ' ' | '❯' | '>'))
+        t.is_empty() || t.chars().all(|c| matches!(c, '─' | '━' | '│' | '╭' | '╮' | '╰' | '╯' | '┌' | '┐' | '└' | '┘' | '═' | ' '))
     };
-    let kept: Vec<&str> = text.lines().filter(|l| !chrome(l)).collect();
+    let kept: Vec<&str> = lines.into_iter().filter(|l| !chrome(l)).collect();
     kept[kept.len().saturating_sub(n)..].to_vec()
 }
 

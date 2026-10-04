@@ -233,7 +233,7 @@ pub fn fetch_pane_text(machine: &Machine, pane_id: String, tx: Sender<Update>) {
     let id = machine.id.clone();
     std::thread::spawn(move || {
         let text = runner
-            .text(&["pane", "read", &pane_id, "--source", "visible", "--lines", "6"])
+            .text(&["pane", "read", &pane_id, "--source", "visible", "--lines", "60"])
             .unwrap_or_default();
         let _ = tx.send(Update::PaneText {
             machine: id,
