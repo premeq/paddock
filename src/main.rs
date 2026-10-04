@@ -83,7 +83,7 @@ fn run(terminal: &mut DefaultTerminal, app: &mut App) -> Result<()> {
                     app.last_error = Some(e.to_string());
                 }
                 app.pane_text.clear();
-                app.rebuild();
+                app.reload_machines();
             }
         }
     }

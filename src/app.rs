@@ -19,6 +19,7 @@ pub struct Prompt {
 
 pub enum PromptKind {
     NewWorkspace { machine: String },
+    ConnectMachine,
     NewWorktree { machine: String, workspace_id: String },
     RenameWorkspace { machine: String, workspace_id: String },
     RenamePane { machine: String, pane_id: String },
@@ -72,6 +73,7 @@ pub struct App {
     pub notice: Option<String>,
     pub size: (u16, u16),
     pub demo: bool,
+    poll_remote: Duration,
     wake: HashMap<String, Sender<()>>,
     tx: Sender<Update>,
     rx: Receiver<Update>,
@@ -110,6 +112,7 @@ impl App {
             notice: None,
             size: (80, 24),
             demo: false,
+            poll_remote,
             wake,
             tx,
             rx,
@@ -143,6 +146,7 @@ impl App {
             notice: None,
             size: (80, 24),
             demo: true,
+            poll_remote: Duration::from_secs(3),
             wake: HashMap::new(),
             tx,
             rx,
@@ -353,7 +357,7 @@ impl App {
                         let Mode::Prompt(p) = std::mem::replace(&mut self.mode, Mode::Normal) else {
                             unreachable!()
                         };
-                        self.submit(p);
+                        return self.submit(p);
                     }
                     _ => {}
                 }
@@ -433,9 +437,7 @@ impl App {
                     kind: PromptKind::NewWorktree { machine, workspace_id },
                 });
             }
-            KeyCode::Char('m') => {
-                return Effect::Exec(vec!["herdr".into(), "machine".into(), "add".into()]);
-            }
+            KeyCode::Char('m') => self.prompt_connect_machine(),
             KeyCode::Char('c') => {
                 if let Some((machine, workspace_id)) = self.workspace_target(&target) {
                     self.run(&machine, &["tab", "create", "--workspace", &workspace_id, "--no-focus"].map(String::from));
@@ -608,6 +610,28 @@ impl App {
         }
     }
 
+    fn prompt_connect_machine(&mut self) {
+        self.mode = Mode::Prompt(Prompt {
+            title: "connect machine · ssh target (host, user@host, ssh alias)".into(),
+            input: String::new(),
+            kind: PromptKind::ConnectMachine,
+        });
+    }
+
+    /// Picks up machines added or removed outside paddock; starts watchers for new ones.
+    pub fn reload_machines(&mut self) {
+        let saved = herdr::saved_machines().unwrap_or_default();
+        self.machines.retain(|m| m.local || saved.iter().any(|s| s.id == m.id));
+        for m in saved {
+            if self.machines.iter().any(|k| k.id == m.id) {
+                continue;
+            }
+            self.wake.insert(m.id.clone(), crate::events::spawn_watcher(&m, self.poll_remote, self.tx.clone()));
+            self.machines.push(m);
+        }
+        self.rebuild();
+    }
+
     fn prompt_new_workspace(&mut self) {
         let machine = match self.rows.get(self.selected).map(|r| &r.target) {
             Some(Target::Machine { machine }) | Some(Target::Workspace { machine, .. }) | Some(Target::Pane { machine, .. }) => machine.clone(),
@@ -644,7 +668,8 @@ impl App {
                 Effect::None
             }
             Some(Target::Action(Action::ConnectMachine)) => {
-                Effect::Exec(vec!["herdr".into(), "machine".into(), "add".into()])
+                self.prompt_connect_machine();
+                Effect::None
             }
             _ => Effect::None,
         }
@@ -683,12 +708,15 @@ impl App {
         Effect::None
     }
 
-    fn submit(&mut self, p: Prompt) {
+    fn submit(&mut self, p: Prompt) -> Effect {
         let input = p.input.trim().to_owned();
         if input.is_empty() {
-            return;
+            return Effect::None;
         }
         match p.kind {
+            PromptKind::ConnectMachine => {
+                return Effect::Exec(vec!["herdr".into(), "machine".into(), "add".into(), input]);
+            }
             PromptKind::NewWorkspace { machine } => {
                 self.run(&machine, &["workspace", "create", "--cwd", &input, "--no-focus"].map(String::from));
             }
@@ -702,6 +730,7 @@ impl App {
                 self.run(&machine, &["pane", "rename", &pane_id, &input].map(String::from));
             }
         }
+        Effect::None
     }
 
     fn run(&mut self, machine: &str, argv: &[String]) {
