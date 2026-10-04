@@ -131,11 +131,13 @@ fn draw_header(buf: &mut Buffer, area: Rect, app: &App) {
             spans.push(Span::styled(format!("{n} {}", s.text()), st));
         }
     }
-    buf.set_line(area.x, area.y, &Line::from(spans), area.width);
     let right = match app.last_error.as_ref().or(app.notice.as_ref()) {
         Some(e) => Span::styled(format!("{e} "), Style::default().fg(T.red)),
         None => Span::styled(format!("{} ", app.health()), Style::default().fg(T.dim)),
     };
+    let right_w = right.content.width().min(area.width as usize / 2);
+    let right = Span::styled(right.content.chars().take(right_w).collect::<String>(), right.style);
+    buf.set_line(area.x, area.y, &Line::from(spans), area.width.saturating_sub(right_w as u16 + 1));
     put_right(buf, area, area.y, vec![right]);
 }
 
