@@ -36,14 +36,16 @@ const DEBOUNCE: Duration = Duration::from_millis(150);
 /// Keeps one machine fresh: a poller that fetches snapshots, and an event
 /// subscription that wakes the poller the moment herdr reports a change.
 /// Without events the poller runs at `every`; with them it slows to a safety net.
-pub fn spawn_watcher(machine: &Machine, every: Duration, tx: Sender<Update>) {
+/// Returns a sender that forces an immediate refetch, used after paddock's own actions.
+pub fn spawn_watcher(machine: &Machine, every: Duration, tx: Sender<Update>) -> Sender<()> {
     let runner = Runner::for_machine(machine);
     let id = machine.id.clone();
     let (wake_tx, wake_rx) = mpsc::channel::<()>();
     let (panes_tx, panes_rx) = mpsc::channel::<Vec<String>>();
     let live = Arc::new(AtomicBool::new(false));
-    spawn_events(runner.clone(), wake_tx, panes_rx, live.clone());
+    spawn_events(runner.clone(), wake_tx.clone(), panes_rx, live.clone());
     std::thread::spawn(move || poll_loop(runner, id, every, tx, wake_rx, panes_tx, live));
+    wake_tx
 }
 
 fn poll_loop(

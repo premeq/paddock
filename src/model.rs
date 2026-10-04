@@ -167,7 +167,6 @@ pub enum Target {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Action {
     NewWorkspace,
-    NewWorktree,
     ConnectMachine,
 }
 
@@ -337,7 +336,8 @@ pub fn build_rows(machines: &[Machine], query: &str, filter: Filter, home: &str,
                             }
                         })
                     } else {
-                        format!("{} · {}", name.or(kind).unwrap_or("terminal"), ix + 1)
+                        let own = p.label.as_deref().or(kind).or(p.terminal_title_stripped.as_deref());
+                        format!("{} · {}", own.unwrap_or("terminal"), ix + 1)
                     };
                     let hay = format!("{label} {} {} {}", p.cwd(), kind.unwrap_or(""), p.pane_id);
                     if !filter.keep(p.agent_status) && kind.is_some() {
@@ -376,6 +376,7 @@ pub fn build_rows(machines: &[Machine], query: &str, filter: Filter, home: &str,
                             depth: 1,
                             label: format!("{} / {} / {label}", m.label, ws.label),
                             last_child: false,
+                            current: false,
                             ..row.clone()
                         });
                     }
@@ -400,7 +401,7 @@ pub fn build_rows(machines: &[Machine], query: &str, filter: Filter, home: &str,
                 }
             }
             if ws.worktree.as_ref().is_some_and(|w| w.is_linked_worktree) {
-                right.push((" · worktree".into(), Tone::Dim));
+                right.push(((if right.is_empty() { "worktree" } else { " · worktree" }).into(), Tone::Dim));
             }
             let mut group = Vec::new();
             group.push(Row {
@@ -482,8 +483,7 @@ pub fn build_rows(machines: &[Machine], query: &str, filter: Filter, home: &str,
     if !filtering {
         out.push(spacer());
         for (label, key, action) in [
-            ("+ new workspace", "n", Action::NewWorkspace),
-            ("+ new worktree from branch…", "t", Action::NewWorktree),
+            ("+ new space", "n", Action::NewWorkspace),
             ("+ connect machine…", "m", Action::ConnectMachine),
         ] {
             out.push(Row {

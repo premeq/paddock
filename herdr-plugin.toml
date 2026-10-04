@@ -1,0 +1,23 @@
+id = "premeq.paddock"
+name = "paddock"
+version = "0.1.0"
+min_herdr_version = "0.9.0"
+description = "Home screen for your herdr fleet: machines, spaces, agents and panes on one screen"
+platforms = ["linux", "macos"]
+
+[[build]]
+command = ["cargo", "build", "--release", "--locked"]
+
+[[actions]]
+id = "open"
+title = "Open paddock"
+contexts = ["workspace"]
+command = ["sh", "-c", "exec \"$HERDR_BIN_PATH\" plugin pane open --plugin premeq.paddock --entrypoint home"]
+
+[[panes]]
+id = "home"
+title = "paddock"
+placement = "popup"
+width = "100%"
+height = "100%"
+command = ["./target/release/paddock"]

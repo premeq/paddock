@@ -465,6 +465,7 @@ fn draw_footer(buf: &mut Buffer, area: Rect, app: &App) {
         .rows
         .get(app.selected)
         .map(|r| match &r.target {
+            Target::Pane { machine, pane_id } if r.depth == 1 => format!(" {} / {pane_id}", r.label),
             Target::Pane { machine, pane_id } => {
                 format!(" {} / {} / {pane_id}", app.machine(machine).map(|m| m.label.as_str()).unwrap_or(""), r.label)
             }

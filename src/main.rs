@@ -1,4 +1,5 @@
 mod app;
+mod demo;
 mod events;
 mod herdr;
 mod model;
@@ -21,12 +22,16 @@ use app::{App, Effect};
 
 fn main() -> Result<()> {
     if std::env::args().any(|a| a == "--help" || a == "-h") {
-        println!("paddock: home screen for your herdr fleet\n\nusage: paddock [--local-poll SECS] [--remote-poll SECS]");
+        println!("paddock: home screen for your herdr fleet\n\nusage: paddock [--local-poll SECS] [--remote-poll SECS] [--demo]");
         return Ok(());
     }
     let local = arg_secs("--local-poll").unwrap_or(1.0);
     let remote = arg_secs("--remote-poll").unwrap_or(3.0);
-    let mut app = App::new(Duration::from_secs_f64(local), Duration::from_secs_f64(remote))?;
+    let mut app = if std::env::args().any(|a| a == "--demo") {
+        App::demo()?
+    } else {
+        App::new(Duration::from_secs_f64(local), Duration::from_secs_f64(remote))?
+    };
     let mut terminal = init();
     let result = run(&mut terminal, &mut app);
     restore();

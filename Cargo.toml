@@ -3,7 +3,7 @@ name = "paddock"
 version = "0.1.0"
 edition = "2021"
 description = "Home screen for your herdr fleet: a standalone terminal client"
-license = "Apache-2.0"
+license = "MIT"
 
 [dependencies]
 ratatui = "0.30"

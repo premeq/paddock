@@ -18,8 +18,8 @@ pub struct Prompt {
 }
 
 pub enum PromptKind {
-    NewWorkspace,
-    NewWorktree { machine: String, workspace_id: Option<String> },
+    NewWorkspace { machine: String },
+    NewWorktree { machine: String, workspace_id: String },
     RenameWorkspace { machine: String, workspace_id: String },
     RenamePane { machine: String, pane_id: String },
 }
@@ -72,6 +72,8 @@ pub struct App {
     pub attached: Option<Attached>,
     pub notice: Option<String>,
     pub size: (u16, u16),
+    pub demo: bool,
+    wake: HashMap<String, Sender<()>>,
     tx: Sender<Update>,
     rx: Receiver<Update>,
     pane_text_requested: Option<(String, String)>,
@@ -83,9 +85,10 @@ impl App {
         let (tx, rx) = std::sync::mpsc::channel();
         let mut machines = vec![Machine::local()];
         machines.extend(herdr::saved_machines().unwrap_or_default());
+        let mut wake = HashMap::new();
         for m in &machines {
             let every = if m.local { poll_local } else { poll_remote };
-            crate::events::spawn_watcher(m, every, tx.clone());
+            wake.insert(m.id.clone(), crate::events::spawn_watcher(m, every, tx.clone()));
         }
         let home = std::env::var("HOME").unwrap_or_default();
         let mut app = App {
@@ -107,6 +110,41 @@ impl App {
             attached: None,
             notice: None,
             size: (80, 24),
+            demo: false,
+            wake,
+            tx,
+            rx,
+            pane_text_requested: None,
+            user_moved: false,
+        };
+        app.rebuild();
+        Ok(app)
+    }
+
+    /// Fixture fleet for screenshots and UI work without a herdr server.
+    pub fn demo() -> Result<Self> {
+        let (tx, rx) = std::sync::mpsc::channel();
+        let mut app = App {
+            machines: crate::demo::fleet(),
+            rows: Vec::new(),
+            counts: Counts::default(),
+            selected: 0,
+            scroll: 0,
+            query: String::new(),
+            filter: Filter::All,
+            mode: Mode::Normal,
+            home: "/home/alex".into(),
+            last_pane: None,
+            pane_text: crate::demo::screens(),
+            last_error: None,
+            refreshed: Some(Instant::now()),
+            state: State::default(),
+            list_area: Rect::default(),
+            attached: None,
+            notice: None,
+            size: (80, 24),
+            demo: true,
+            wake: HashMap::new(),
             tx,
             rx,
             pane_text_requested: None,
@@ -262,6 +300,9 @@ impl App {
         if self.pane_text_requested.as_ref() == Some(&key) && self.pane_text.contains_key(&key) {
             return;
         }
+        if self.demo {
+            return;
+        }
         if let Some(m) = self.machine(machine) {
             herdr::fetch_pane_text(m, pane_id.clone(), self.tx.clone());
             self.pane_text_requested = Some(key);
@@ -388,10 +429,12 @@ impl App {
             KeyCode::Char('n') => self.prompt_new_workspace(),
             KeyCode::Char('t') => {
                 let (machine, workspace_id) = match &target {
-                    Some(Target::Workspace { machine, workspace_id }) => (machine.clone(), Some(workspace_id.clone())),
-                    Some(Target::Pane { machine, pane_id }) => (machine.clone(), self.workspace_of(machine, pane_id)),
-                    Some(Target::Machine { machine }) => (machine.clone(), None),
-                    _ => ("local".into(), None),
+                    Some(Target::Workspace { machine, workspace_id }) => (machine.clone(), workspace_id.clone()),
+                    Some(Target::Pane { machine, pane_id }) if self.workspace_of(machine, pane_id).is_some() => (machine.clone(), self.workspace_of(machine, pane_id).unwrap()),
+                    _ => {
+                        self.notice = Some("select a space first".into());
+                        return Effect::None;
+                    }
                 };
                 self.mode = Mode::Prompt(Prompt {
                     title: "new worktree · branch name".into(),
@@ -569,10 +612,15 @@ impl App {
     }
 
     fn prompt_new_workspace(&mut self) {
+        let machine = match self.rows.get(self.selected).map(|r| &r.target) {
+            Some(Target::Machine { machine }) | Some(Target::Workspace { machine, .. }) | Some(Target::Pane { machine, .. }) => machine.clone(),
+            _ => "local".into(),
+        };
+        let label = self.machine(&machine).map(|m| m.label.clone()).unwrap_or_default();
         self.mode = Mode::Prompt(Prompt {
-            title: "new space · directory".into(),
+            title: format!("new space on {label} · directory"),
             input: "~/".into(),
-            kind: PromptKind::NewWorkspace,
+            kind: PromptKind::NewWorkspace { machine },
         });
     }
 
@@ -598,17 +646,6 @@ impl App {
                 self.prompt_new_workspace();
                 Effect::None
             }
-            Some(Target::Action(Action::NewWorktree)) => {
-                self.mode = Mode::Prompt(Prompt {
-                    title: "new worktree · branch name".into(),
-                    input: String::new(),
-                    kind: PromptKind::NewWorktree {
-                        machine: "local".into(),
-                        workspace_id: None,
-                    },
-                });
-                Effect::None
-            }
             Some(Target::Action(Action::ConnectMachine)) => {
                 Effect::Exec(vec!["herdr".into(), "machine".into(), "add".into()])
             }
@@ -617,6 +654,10 @@ impl App {
     }
 
     fn attach(&mut self, machine: &str, pane_id: &str) -> Effect {
+        if self.demo {
+            self.notice = Some("demo mode: attach is disabled".into());
+            return Effect::None;
+        }
         let Some(m) = self.machine(machine) else {
             return Effect::None;
         };
@@ -647,18 +688,11 @@ impl App {
             return;
         }
         match p.kind {
-            PromptKind::NewWorkspace => {
-                let cwd = input.replacen('~', &self.home, 1);
-                self.run("local", &["workspace", "create", "--cwd", &cwd, "--no-focus"].map(String::from));
+            PromptKind::NewWorkspace { machine } => {
+                self.run(&machine, &["workspace", "create", "--cwd", &input, "--no-focus"].map(String::from));
             }
             PromptKind::NewWorktree { machine, workspace_id } => {
-                let mut argv = vec!["worktree".to_owned(), "create".to_owned()];
-                match workspace_id {
-                    Some(w) => argv.extend(["--workspace".to_owned(), w]),
-                    None => argv.extend(["--cwd".to_owned(), std::env::current_dir().map(|p| p.display().to_string()).unwrap_or_default()]),
-                }
-                argv.extend(["--branch".to_owned(), input, "--no-focus".to_owned()]);
-                self.run(&machine, &argv);
+                self.run(&machine, &["worktree", "create", "--workspace", &workspace_id, "--branch", &input, "--no-focus"].map(String::from));
             }
             PromptKind::RenameWorkspace { machine, workspace_id } => {
                 self.run(&machine, &["workspace", "rename", &workspace_id, &input].map(String::from));
@@ -674,8 +708,17 @@ impl App {
             return;
         };
         let args: Vec<&str> = argv.iter().map(String::as_str).collect();
+        if self.demo {
+            self.notice = Some("demo mode: actions are disabled".into());
+            return;
+        }
         match Runner::for_machine(m).json(&args) {
-            Ok(_) => self.last_error = None,
+            Ok(_) => {
+                self.last_error = None;
+                if let Some(w) = self.wake.get(machine) {
+                    let _ = w.send(());
+                }
+            }
             Err(e) => self.last_error = Some(e.to_string()),
         }
     }
