@@ -411,10 +411,9 @@ fn detail_lines<'a>(app: &'a App, row: &'a crate::model::Row, right_w: usize, ri
                     for (k, v) in [("enter", "attach"), ("r", "rename"), ("x", "close")] {
                         facts.push(action_line(k, v));
                     }
-                    extra.push(head("screen"));
                     match app.pane_text.get(&(machine.clone(), pane_id.clone())) {
                         Some(text) => {
-                            for l in screen_tail(text, right_h.saturating_sub(1)) {
+                            for l in screen_tail(text, right_h) {
                                 let l: String = l.chars().take(right_w).collect();
                                 extra.push(Line::from(Span::styled(l, Style::default().fg(T.sub))));
                             }
