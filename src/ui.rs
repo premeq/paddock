@@ -62,10 +62,23 @@ pub fn draw(f: &mut Frame, app: &mut App) {
 }
 
 fn draw_attached(f: &mut Frame, area: Rect, app: &mut App) {
-    let pane = Rect::new(area.x, area.y, area.width, area.height.saturating_sub(1));
-    let bar = Rect::new(area.x, pane.bottom(), area.width, 1);
-    let status = app.attached_status().unwrap_or_default();
-    let color = app.attached_agent_status().map(status_color).unwrap_or(T.sub);
+    let header = Rect::new(area.x, area.y, area.width, 1);
+    let pane = Rect::new(area.x, area.y + 2, area.width, area.height.saturating_sub(2));
+    let mut spans = vec![Span::styled(" paddock", Style::default().fg(T.accent).add_modifier(Modifier::BOLD))];
+    for c in app.attached_crumbs() {
+        spans.push(Span::styled(" › ", Style::default().fg(T.dim)));
+        spans.push(Span::styled(c, Style::default().fg(T.text)));
+    }
+    if let Some((kind, status)) = app.attached_agent() {
+        spans.push(Span::styled("   ", Style::default()));
+        spans.push(Span::styled(format!("{} ", status.dot()), Style::default().fg(status_color(status))));
+        spans.push(Span::styled(format!("{kind} "), Style::default().fg(T.dim)));
+        spans.push(Span::styled(status.text(), Style::default().fg(status_color(status))));
+    }
+    let hint = format!("{} → home ", app.state.home_key);
+    f.buffer_mut().set_line(header.x, header.y, &Line::from(spans), header.width.saturating_sub(hint.width() as u16 + 1));
+    put_right(f.buffer_mut(), header, header.y, vec![Span::styled(hint, Style::default().fg(T.dim))]);
+    hline(f.buffer_mut(), area.y + 1, area);
     if let Some(a) = &mut app.attached {
         a.view.resize(pane.width, pane.height);
         a.view.render(pane, f.buffer_mut());
@@ -73,17 +86,6 @@ fn draw_attached(f: &mut Frame, area: Rect, app: &mut App) {
             f.set_cursor_position((x, y));
         }
     }
-    f.buffer_mut().set_style(bar, Style::default().fg(T.dim));
-    f.buffer_mut().set_line(bar.x, bar.y, &Line::from(Span::styled(status, Style::default().fg(color))), bar.width);
-    put_right(
-        f.buffer_mut(),
-        bar,
-        bar.y,
-        vec![Span::styled(
-            format!("{p} h → home · {p} {p} → literal ", p = app.state.prefix),
-            Style::default().fg(T.dim),
-        )],
-    );
 }
 
 fn hline(buf: &mut Buffer, y: u16, area: Rect) {

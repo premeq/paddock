@@ -8,7 +8,7 @@ agent and terminal on one screen; Enter drops you into any pane.
 - **Needs you** on top: blocked and done agents from every machine.
 - Tree of machines → spaces → panes with agent status, branch and path.
 - Detail panel: git state, agents and their topic, tabs, the pane's last lines.
-- Panes open inside paddock with a status bar. `ctrl+b h` brings you home.
+- Panes open inside paddock under a breadcrumb bar. `F12` brings you home.
 - Create spaces, worktrees and tabs. Rename, pin, close, delete checkouts.
 - Live: subscribes to herdr's event stream, locally and over SSH.
 
@@ -52,17 +52,18 @@ description = "paddock"
 | `a b w i d` | filter: all, blocked, working, idle, done |
 | `n` `m` | new space, connect machine |
 | `t` `c` `r` `p` `x` `D` | new worktree, new tab, rename, pin, close, delete checkout |
-| `ctrl+b h` | in a pane: back home (`ctrl+b ctrl+b` sends a literal ctrl+b) |
+| `F12` | in a pane: back home |
 
-The prefix is `ctrl+b` by default. Change it in `~/.config/paddock/state.json`:
+The home key is `F12` by default. Change it in `~/.config/paddock/state.json`:
 
 ```json
-{ "prefix": "ctrl+a" }
+{ "home_key": "ctrl+a" }
 ```
 
-Accepted forms: `ctrl`, `alt`, `shift` plus one character or `space`. If it
-is also your herdr prefix, paddock sees it first inside a pane; send it
-through with the double press.
+Accepted forms: `f1`..`f24`, `esc`, `space`, or one character, each with
+optional `ctrl`, `alt`, `shift`. Pick a key the programs in your panes don't
+need; paddock takes it before they see it. On macOS, F-keys need "Use F1, F2,
+etc. keys as standard function keys" or the fn modifier.
 | `q` | quit |
 
 Mouse: click selects, click again opens, wheel scrolls.

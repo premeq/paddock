@@ -37,12 +37,11 @@ pub enum Mode {
     Confirm(Confirm),
 }
 
-/// A pane streamed into paddock. `prefix` is set after the prefix key, waiting for the chord key.
+/// A pane streamed into paddock.
 pub struct Attached {
     pub view: PaneView,
     pub machine: String,
     pub pane_id: String,
-    pub prefix: bool,
 }
 
 /// What the event loop must do outside the TUI after handling a key.
@@ -312,20 +311,9 @@ impl App {
     pub fn key(&mut self, k: KeyEvent) -> Effect {
         self.user_moved = true;
         if let Some(a) = &mut self.attached {
-            let prefix_key = self.state.prefix_key();
-            let is_prefix = k.code == prefix_key.code && k.modifiers == prefix_key.modifiers;
-            if a.prefix {
-                a.prefix = false;
-                match k.code {
-                    KeyCode::Char('h') | KeyCode::Char('q') | KeyCode::Esc => self.detach(None),
-                    _ if is_prefix => a.view.key(k),
-                    _ => {
-                        a.view.key(prefix_key);
-                        a.view.key(k);
-                    }
-                }
-            } else if is_prefix {
-                a.prefix = true;
+            let home = self.state.home_key();
+            if k.code == home.code && k.modifiers == home.modifiers {
+                self.detach(None);
             } else {
                 a.view.key(k);
             }
@@ -534,32 +522,38 @@ impl App {
         self.rebuild();
     }
 
-    /// Status line shown under an attached pane.
-    pub fn attached_status(&self) -> Option<String> {
-        let a = self.attached.as_ref()?;
-        let m = self.machine(&a.machine)?;
-        let p = m.snapshot.panes.iter().find(|p| p.pane_id == a.pane_id);
-        let ws = p.and_then(|p| m.snapshot.workspaces.iter().find(|w| w.workspace_id == p.workspace_id));
-        let agent = p.and_then(|p| p.agent.as_deref().map(|a| format!(" · {a} {}", p.agent_status.text())));
-        Some(format!(
-            " {} / {} / {}{}{}",
-            m.label,
-            ws.map(|w| w.label.as_str()).unwrap_or("?"),
-            a.pane_id,
-            agent.unwrap_or_default(),
-            if a.prefix { format!(" · {} …", self.state.prefix) } else { String::new() }
-        ))
+    /// Breadcrumb for the attached pane: machine, space, tab, pane label.
+    pub fn attached_crumbs(&self) -> Vec<String> {
+        let Some(a) = self.attached.as_ref() else {
+            return Vec::new();
+        };
+        let Some(m) = self.machine(&a.machine) else {
+            return Vec::new();
+        };
+        let mut crumbs = vec![m.label.clone()];
+        if let Some(p) = m.snapshot.panes.iter().find(|p| p.pane_id == a.pane_id) {
+            if let Some(ws) = m.snapshot.workspaces.iter().find(|w| w.workspace_id == p.workspace_id) {
+                crumbs.push(ws.label.clone());
+            }
+            if let Some(t) = m.snapshot.tabs.iter().find(|t| t.tab_id == p.tab_id) {
+                crumbs.push(t.label.clone());
+            }
+            if let Some(name) = &p.label {
+                crumbs.push(name.clone());
+            }
+        }
+        crumbs
     }
 
-    pub fn attached_agent_status(&self) -> Option<Status> {
+    pub fn attached_agent(&self) -> Option<(String, Status)> {
         let a = self.attached.as_ref()?;
         let p = self.machine(&a.machine)?.snapshot.panes.iter().find(|p| p.pane_id == a.pane_id)?;
-        p.agent.as_ref().map(|_| p.agent_status)
+        p.agent.as_ref().map(|k| (k.clone(), p.agent_status))
     }
 
     pub fn mouse(&mut self, m: MouseEvent) -> Effect {
         if let Some(a) = &mut self.attached {
-            a.view.mouse(m, (0, 0));
+            a.view.mouse(m, (0, 2));
             return Effect::None;
         }
         if !matches!(self.mode, Mode::Normal) {
@@ -680,7 +674,6 @@ impl App {
                     view,
                     machine: machine.to_owned(),
                     pane_id: pane_id.to_owned(),
-                    prefix: false,
                 });
             }
             Err(e) => self.notice = Some(format!("attach failed: {e}")),

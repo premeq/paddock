@@ -9,28 +9,28 @@ use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 pub struct State {
     #[serde(default)]
     pub pinned: Vec<String>,
-    /// Chord prefix inside a pane, e.g. "ctrl+b" or "ctrl+a".
-    #[serde(default = "default_prefix")]
-    pub prefix: String,
+    /// Key that returns from a pane to the home screen, e.g. "f12" or "ctrl+a".
+    #[serde(default = "default_home_key")]
+    pub home_key: String,
 }
 
-fn default_prefix() -> String {
-    "ctrl+b".into()
+fn default_home_key() -> String {
+    "f12".into()
 }
 
 impl Default for State {
     fn default() -> Self {
         State {
             pinned: Vec::new(),
-            prefix: default_prefix(),
+            home_key: default_home_key(),
         }
     }
 }
 
 impl State {
-    /// The prefix as a key event, or ctrl+b when the setting cannot be parsed.
-    pub fn prefix_key(&self) -> KeyEvent {
-        parse_key(&self.prefix).unwrap_or(KeyEvent::new(KeyCode::Char('b'), KeyModifiers::CONTROL))
+    /// The home key as a key event, or F12 when the setting cannot be parsed.
+    pub fn home_key(&self) -> KeyEvent {
+        parse_key(&self.home_key).unwrap_or(KeyEvent::new(KeyCode::F(12), KeyModifiers::NONE))
     }
 
     fn path() -> PathBuf {
@@ -77,7 +77,11 @@ fn parse_key(spec: &str) -> Option<KeyEvent> {
             "alt" | "opt" | "option" => mods |= KeyModifiers::ALT,
             "shift" => mods |= KeyModifiers::SHIFT,
             "space" => key = Some(KeyCode::Char(' ')),
+            "esc" | "escape" => key = Some(KeyCode::Esc),
             k if k.chars().count() == 1 => key = Some(KeyCode::Char(k.chars().next()?)),
+            k if k.starts_with('f') && k[1..].parse::<u8>().is_ok_and(|n| (1..=24).contains(&n)) => {
+                key = Some(KeyCode::F(k[1..].parse().ok()?))
+            }
             _ => return None,
         }
     }
@@ -89,10 +93,12 @@ mod tests {
     use super::*;
 
     #[test]
-    fn parses_prefix_specs() {
+    fn parses_key_specs() {
         assert_eq!(parse_key("ctrl+a"), Some(KeyEvent::new(KeyCode::Char('a'), KeyModifiers::CONTROL)));
         assert_eq!(parse_key("Ctrl+Space"), Some(KeyEvent::new(KeyCode::Char(' '), KeyModifiers::CONTROL)));
-        assert_eq!(parse_key("f12"), None);
-        assert_eq!(State::default().prefix_key(), KeyEvent::new(KeyCode::Char('b'), KeyModifiers::CONTROL));
+        assert_eq!(parse_key("F12"), Some(KeyEvent::new(KeyCode::F(12), KeyModifiers::NONE)));
+        assert_eq!(parse_key("shift+f5"), Some(KeyEvent::new(KeyCode::F(5), KeyModifiers::SHIFT)));
+        assert_eq!(parse_key("f99"), None);
+        assert_eq!(State::default().home_key(), KeyEvent::new(KeyCode::F(12), KeyModifiers::NONE));
     }
 }
