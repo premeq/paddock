@@ -2,7 +2,7 @@ use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, Borders, Clear, Paragraph, Widget};
+use ratatui::widgets::{Block, Borders, Clear, Paragraph, Widget, Wrap};
 use ratatui::Frame;
 use unicode_width::UnicodeWidthStr;
 
@@ -260,11 +260,11 @@ fn draw_detail(buf: &mut Buffer, area: Rect, app: &App) {
     } else {
         None
     };
-    let (facts, extra) = detail_lines(app, row, right.map_or(left.width, |r| r.width) as usize);
+    let column = right.unwrap_or(left);
+    let (facts, extra) = detail_lines(app, row, column.width as usize, column.height as usize);
     Paragraph::new(facts).render(left, buf);
-    match right {
-        Some(r) => Paragraph::new(extra).render(r, buf),
-        None => {}
+    if let Some(r) = right {
+        Paragraph::new(extra).wrap(Wrap { trim: false }).render(r, buf);
     }
 }
 
@@ -280,7 +280,7 @@ fn head<'a>(h: &str) -> Line<'a> {
 }
 
 /// Left column: facts and members. Right column: screen or actions.
-fn detail_lines<'a>(app: &'a App, row: &'a crate::model::Row, right_w: usize) -> (Vec<Line<'a>>, Vec<Line<'a>>) {
+fn detail_lines<'a>(app: &'a App, row: &'a crate::model::Row, right_w: usize, right_h: usize) -> (Vec<Line<'a>>, Vec<Line<'a>>) {
     let mut facts: Vec<Line> = Vec::new();
     let mut extra: Vec<Line> = Vec::new();
     let home = app.home.as_str();
@@ -395,8 +395,7 @@ fn detail_lines<'a>(app: &'a App, row: &'a crate::model::Row, right_w: usize) ->
                     extra.push(head("screen"));
                     match app.pane_text.get(&(machine.clone(), pane_id.clone())) {
                         Some(text) => {
-                            for l in screen_tail(text, 12) {
-                                let l: String = l.chars().take(right_w).collect();
+                            for l in fit_tail(screen_tail(text, 40), right_w, right_h.saturating_sub(1)) {
                                 extra.push(Line::from(Span::styled(l, Style::default().fg(T.sub))));
                             }
                         }
@@ -440,6 +439,22 @@ fn screen_tail(text: &str, n: usize) -> Vec<&str> {
     };
     let kept: Vec<&str> = lines.into_iter().filter(|l| !chrome(l)).collect();
     kept[kept.len().saturating_sub(n)..].to_vec()
+}
+
+/// Keeps the last lines that fit in `rows` once wrapped at `width`.
+fn fit_tail(lines: Vec<&str>, width: usize, rows: usize) -> Vec<&str> {
+    let width = width.max(1);
+    let mut used = 0;
+    let mut start = lines.len();
+    for (i, l) in lines.iter().enumerate().rev() {
+        let need = l.width().max(1).div_ceil(width);
+        if used + need > rows {
+            break;
+        }
+        used += need;
+        start = i;
+    }
+    lines[start..].to_vec()
 }
 
 fn action_line<'a>(k: &str, v: &str) -> Line<'a> {
