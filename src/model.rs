@@ -161,7 +161,23 @@ pub enum Target {
     Machine { machine: String },
     Workspace { machine: String, workspace_id: String },
     Pane { machine: String, pane_id: String },
+    /// A pane listed again under "Needs you"; same pane, distinct row identity.
+    Attention { machine: String, pane_id: String },
     Action(Action),
+    Separator(u8),
+}
+
+impl Target {
+    /// Folds the Needs-you alias onto the pane it points at.
+    pub fn resolved(&self) -> Target {
+        match self {
+            Target::Attention { machine, pane_id } => Target::Pane {
+                machine: machine.clone(),
+                pane_id: pane_id.clone(),
+            },
+            t => t.clone(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -377,6 +393,10 @@ pub fn build_rows(machines: &[Machine], query: &str, filter: Filter, home: &str,
                             label: format!("{} / {} / {label}", m.label, ws.label),
                             last_child: false,
                             current: false,
+                            target: Target::Attention {
+                                machine: m.id.clone(),
+                                pane_id: p.pane_id.clone(),
+                            },
                             ..row.clone()
                         });
                     }
@@ -474,14 +494,14 @@ pub fn build_rows(machines: &[Machine], query: &str, filter: Filter, home: &str,
             current: false,
             bold: true,
             dimmed: false,
-            target: Target::Action(Action::NewWorkspace),
+            target: Target::Separator(0),
         });
         out.extend(needs);
-        out.push(spacer());
+        out.push(spacer(1));
     }
     out.extend(rows);
     if !filtering {
-        out.push(spacer());
+        out.push(spacer(2));
         for (label, key, action) in [
             ("+ new space", "n", Action::NewWorkspace),
             ("+ connect machine…", "m", Action::ConnectMachine),
@@ -503,7 +523,7 @@ pub fn build_rows(machines: &[Machine], query: &str, filter: Filter, home: &str,
     Rows { rows: out, counts }
 }
 
-fn spacer() -> Row {
+fn spacer(n: u8) -> Row {
     Row {
         depth: 0,
         label: String::new(),
@@ -514,12 +534,12 @@ fn spacer() -> Row {
         current: false,
         bold: false,
         dimmed: false,
-        target: Target::Action(Action::NewWorkspace),
+        target: Target::Separator(n),
     }
 }
 
 impl Row {
     pub fn selectable(&self) -> bool {
-        !(self.label.is_empty() || self.label == "Needs you")
+        !matches!(self.target, Target::Separator(_))
     }
 }

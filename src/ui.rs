@@ -241,7 +241,7 @@ fn draw_detail(buf: &mut Buffer, area: Rect, app: &App) {
     let Some(row) = app.rows.get(app.selected) else {
         return;
     };
-    let title = match &row.target {
+    let title = match &row.target.resolved() {
         Target::Action(_) => "paddock".to_owned(),
         _ => row.label.trim_start_matches("★ ").to_owned(),
     };
@@ -288,7 +288,7 @@ fn detail_lines<'a>(app: &'a App, row: &'a crate::model::Row, right_w: usize, ri
     let mut extra: Vec<Line> = Vec::new();
     let home = app.home.as_str();
     let val = |v: String| Span::styled(v, Style::default().fg(T.text));
-    match &row.target {
+    match &row.target.resolved() {
         Target::Machine { machine } => {
             if let Some(m) = app.machine(machine) {
                 facts.push(kv("link", link_text(m.link)));
@@ -408,7 +408,7 @@ fn detail_lines<'a>(app: &'a App, row: &'a crate::model::Row, right_w: usize, ri
                 }
             }
         }
-        Target::Action(_) => {
+        Target::Action(_) | Target::Separator(_) | Target::Attention { .. } => {
             facts.push(Line::from(val("Home screen for your herdr fleet.".into())));
             facts.push(head("keys"));
             for (k, v) in [("↑↓ j k", "move"), ("← →", "previous / next space"), ("enter", "open"), ("esc", "back to last pane"), ("/", "search"), ("q", "quit")] {
@@ -468,7 +468,7 @@ fn draw_footer(buf: &mut Buffer, area: Rect, app: &App) {
         .rows
         .get(app.selected)
         .map(|r| match &r.target {
-            Target::Pane { machine, pane_id } if r.depth == 1 => format!(" {} / {pane_id}", r.label),
+            Target::Attention { pane_id, .. } => format!(" {} / {pane_id}", r.label),
             Target::Pane { machine, pane_id } => {
                 format!(" {} / {} / {pane_id}", app.machine(machine).map(|m| m.label.as_str()).unwrap_or(""), r.label)
             }

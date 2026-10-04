@@ -293,7 +293,7 @@ impl App {
     }
 
     fn request_pane_text(&mut self) {
-        let Some(Target::Pane { machine, pane_id }) = self.rows.get(self.selected).map(|r| &r.target) else {
+        let Some(Target::Pane { machine, pane_id }) = self.rows.get(self.selected).map(|r| r.target.resolved()) else {
             return;
         };
         let key = (machine.clone(), pane_id.clone());
@@ -303,7 +303,7 @@ impl App {
         if self.demo {
             return;
         }
-        if let Some(m) = self.machine(machine) {
+        if let Some(m) = self.machine(&machine) {
             herdr::fetch_pane_text(m, pane_id.clone(), self.tx.clone());
             self.pane_text_requested = Some(key);
         }
@@ -384,7 +384,7 @@ impl App {
     }
 
     fn key_normal(&mut self, k: KeyEvent) -> Effect {
-        let target = self.rows.get(self.selected).map(|r| r.target.clone());
+        let target = self.rows.get(self.selected).map(|r| r.target.resolved());
         match k.code {
             KeyCode::Char('q') => return Effect::Quit,
             KeyCode::Char('c') if k.modifiers.contains(KeyModifiers::CONTROL) => return Effect::Quit,
@@ -574,7 +574,7 @@ impl App {
                     let ix = self.scroll + (m.row - a.y) as usize;
                     if self.rows.get(ix).is_some_and(|r| r.selectable()) {
                         if ix == self.selected {
-                            let target = self.rows[ix].target.clone();
+                            let target = self.rows[ix].target.resolved();
                             return self.open(Some(target));
                         }
                         self.user_moved = true;
@@ -669,7 +669,12 @@ impl App {
         let (cols, rows) = (self.size.0, self.size.1.saturating_sub(1).max(1));
         match PaneView::open(&runner, &p.pane_id, cols, rows) {
             Ok(view) => {
-                let _ = runner.json(&["pane", "focus", pane_id]);
+                if p.agent.is_some() {
+                    let _ = runner.json(&["agent", "focus", pane_id]);
+                    if let Some(w) = self.wake.get(machine) {
+                        let _ = w.send(());
+                    }
+                }
                 self.last_pane = Some((machine.to_owned(), pane_id.to_owned()));
                 self.attached = Some(Attached {
                     view,
