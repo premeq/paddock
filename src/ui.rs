@@ -2,7 +2,7 @@ use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, Borders, Clear, Paragraph, Widget, Wrap};
+use ratatui::widgets::{Block, Borders, Clear, Paragraph, Widget};
 use ratatui::Frame;
 use unicode_width::UnicodeWidthStr;
 
@@ -264,7 +264,7 @@ fn draw_detail(buf: &mut Buffer, area: Rect, app: &App) {
     let (facts, extra) = detail_lines(app, row, column.width as usize, column.height as usize);
     Paragraph::new(facts).render(left, buf);
     if let Some(r) = right {
-        Paragraph::new(extra).wrap(Wrap { trim: false }).render(r, buf);
+        Paragraph::new(extra).render(r, buf);
     }
 }
 
@@ -395,7 +395,8 @@ fn detail_lines<'a>(app: &'a App, row: &'a crate::model::Row, right_w: usize, ri
                     extra.push(head("screen"));
                     match app.pane_text.get(&(machine.clone(), pane_id.clone())) {
                         Some(text) => {
-                            for l in fit_tail(screen_tail(text, 40), right_w, right_h.saturating_sub(1)) {
+                            for l in screen_tail(text, right_h.saturating_sub(1)) {
+                                let l: String = l.chars().take(right_w).collect();
                                 extra.push(Line::from(Span::styled(l, Style::default().fg(T.sub))));
                             }
                         }
@@ -441,22 +442,6 @@ fn screen_tail(text: &str, n: usize) -> Vec<&str> {
     kept[kept.len().saturating_sub(n)..].to_vec()
 }
 
-/// Keeps the last lines that fit in `rows` once wrapped at `width`.
-fn fit_tail(lines: Vec<&str>, width: usize, rows: usize) -> Vec<&str> {
-    let width = width.max(1);
-    let mut used = 0;
-    let mut start = lines.len();
-    for (i, l) in lines.iter().enumerate().rev() {
-        let need = l.width().max(1).div_ceil(width);
-        if used + need > rows {
-            break;
-        }
-        used += need;
-        start = i;
-    }
-    lines[start..].to_vec()
-}
-
 fn action_line<'a>(k: &str, v: &str) -> Line<'a> {
     Line::from(vec![
         Span::styled(
@@ -496,6 +481,8 @@ fn draw_footer(buf: &mut Buffer, area: Rect, app: &App) {
         Mode::Confirm(_) => " y confirm · esc cancel",
         Mode::Normal => " ↑↓ rows · ←→ space · enter open · n/t/m create · c/r/x/D edit · a/b/w/i/d filter · / search · q quit",
     };
+    let tail = if app.last_pane.is_some() { 18 } else { 0 };
+    let hint: String = hint.chars().take((area.width as usize).saturating_sub(tail)).collect();
     buf.set_string(area.x, area.y + 1, hint, Style::default().fg(T.dim));
     if app.last_pane.is_some() {
         put_right(
