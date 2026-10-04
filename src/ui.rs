@@ -49,7 +49,6 @@ pub fn draw(f: &mut Frame, app: &mut App) {
     let detail = Rect::new(body.x + 1, tree.bottom() + 1, body.width - 2, detail_h);
     draw_header(f.buffer_mut(), header, app);
     hline(f.buffer_mut(), area.y + 1, area);
-    hline(f.buffer_mut(), tree.bottom(), area);
     hline(f.buffer_mut(), footer.y - 1, area);
     draw_tree(f.buffer_mut(), tree, app);
     draw_detail(f.buffer_mut(), detail, app);
@@ -270,7 +269,20 @@ fn draw_detail(buf: &mut Buffer, area: Rect, app: &App) {
     let Some(row) = app.rows.get(app.selected) else {
         return;
     };
-    let inner = area;
+    let title = match &row.target.resolved() {
+        Target::Action(_) => "paddock".to_owned(),
+        _ => row.label.trim_start_matches("★ ").to_owned(),
+    };
+    let rule = Line::from(vec![
+        Span::styled("─ ", Style::default().fg(T.line)),
+        Span::styled(title.clone(), Style::default().fg(T.accent).add_modifier(Modifier::BOLD)),
+        Span::styled(
+            format!(" {}", "─".repeat((area.width as usize).saturating_sub(title.width() + 3))),
+            Style::default().fg(T.line),
+        ),
+    ]);
+    buf.set_line(area.x, area.y, &rule, area.width);
+    let inner = Rect::new(area.x, area.y + 1, area.width, area.height - 1);
     let gap = 3;
     let left_w = if inner.width >= 90 { inner.width / 2 } else { inner.width };
     let left = Rect::new(inner.x, inner.y, left_w, inner.height);
