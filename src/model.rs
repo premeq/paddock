@@ -63,7 +63,6 @@ pub struct Pane {
     pub pane_id: String,
     pub tab_id: String,
     pub workspace_id: String,
-    pub terminal_id: String,
     pub agent_status: Status,
     #[serde(default)]
     pub agent: Option<String>,
@@ -274,7 +273,7 @@ fn matches(words: &[String], text: &str) -> bool {
     words.iter().all(|w| lower.contains(w.as_str()))
 }
 
-pub fn build_rows(machines: &[Machine], query: &str, filter: Filter, home: &str) -> Rows {
+pub fn build_rows(machines: &[Machine], query: &str, filter: Filter, home: &str, pinned: &[String]) -> Rows {
     let words: Vec<String> = query.split_whitespace().map(str::to_lowercase).collect();
     let filtering = !words.is_empty() || filter != Filter::All;
     let mut counts = Counts {
@@ -287,7 +286,7 @@ pub fn build_rows(machines: &[Machine], query: &str, filter: Filter, home: &str)
     for m in machines {
         let dimmed = m.link != Link::Online;
         counts.workspaces += m.snapshot.workspaces.len();
-        let mut machine_rows = Vec::new();
+        let mut groups: Vec<(bool, Vec<Row>)> = Vec::new();
         let mut agent_names: HashMap<&str, usize> = HashMap::new();
         for p in &m.snapshot.panes {
             if p.agent.is_some() {
@@ -392,6 +391,8 @@ pub fn build_rows(machines: &[Machine], query: &str, filter: Filter, home: &str)
             if let Some(last) = children.last_mut() {
                 last.last_child = true;
             }
+            let pin_key = format!("{}:{}", m.id, ws.workspace_id);
+            let is_pinned = pinned.contains(&pin_key);
             let mut right = Vec::new();
             if let Some(g) = m.git.get(&ws.workspace_id) {
                 if !g.branch.is_empty() {
@@ -401,9 +402,10 @@ pub fn build_rows(machines: &[Machine], query: &str, filter: Filter, home: &str)
             if ws.worktree.as_ref().is_some_and(|w| w.is_linked_worktree) {
                 right.push((" · worktree".into(), Tone::Dim));
             }
-            machine_rows.push(Row {
+            let mut group = Vec::new();
+            group.push(Row {
                 depth: 1,
-                label: ws.label.clone(),
+                label: if is_pinned { format!("★ {}", ws.label) } else { ws.label.clone() },
                 right,
                 status: None,
                 glyph: None,
@@ -416,8 +418,11 @@ pub fn build_rows(machines: &[Machine], query: &str, filter: Filter, home: &str)
                     workspace_id: ws.workspace_id.clone(),
                 },
             });
-            machine_rows.extend(children);
+            group.extend(children);
+            groups.push((is_pinned, group));
         }
+        groups.sort_by_key(|(pinned, _)| !pinned);
+        let machine_rows: Vec<Row> = groups.into_iter().flat_map(|(_, g)| g).collect();
         if filtering && machine_rows.is_empty() && !matches(&words, &m.label) {
             continue;
         }

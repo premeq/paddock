@@ -1,7 +1,6 @@
 use std::collections::HashMap;
 use std::process::{Command, Stdio};
 use std::sync::mpsc::Sender;
-use std::time::{Duration, Instant};
 
 use anyhow::{anyhow, bail, Context, Result};
 use serde::Deserialize;
@@ -152,18 +151,23 @@ impl Runner {
         out
     }
 
-    /// Argv that attaches the current terminal to a pane's terminal stream.
-    pub fn attach_argv(&self, terminal_id: &str) -> Vec<String> {
+    pub fn session_control_argv(&self, pane_id: &str, cols: u16, rows: u16) -> Vec<String> {
+        let (cols, rows) = (cols.to_string(), rows.to_string());
         match &self.ssh_target {
             Some(target) => {
                 let mut cmd = String::from("exec herdr");
                 if let Some(s) = &self.session {
                     cmd.push_str(&format!(" --session {}", shell_quote(s)));
                 }
-                cmd.push_str(&format!(" terminal attach {}", shell_quote(terminal_id)));
-                vec!["ssh".into(), "-t".into(), target.clone(), cmd]
+                cmd.push_str(&format!(
+                    " terminal session control {} --cols {cols} --rows {rows}",
+                    shell_quote(pane_id)
+                ));
+                ["ssh", "-o", "BatchMode=yes", "-S", "none", target, &cmd].map(String::from).to_vec()
             }
-            None => vec!["herdr".into(), "terminal".into(), "attach".into(), terminal_id.into()],
+            None => ["herdr", "terminal", "session", "control", pane_id, "--cols", &cols, "--rows", &rows]
+                .map(String::from)
+                .to_vec(),
         }
     }
 }
@@ -222,62 +226,6 @@ pub enum Update {
         pane_id: String,
         text: String,
     },
-}
-
-/// One polling thread per machine. Snapshots every `every`, git state every 30 s.
-pub fn spawn_poller(machine: &Machine, every: Duration, tx: Sender<Update>) {
-    let runner = Runner::for_machine(machine);
-    let id = machine.id.clone();
-    std::thread::spawn(move || {
-        let mut last_git = Instant::now() - Duration::from_secs(60);
-        let mut paths: Vec<(String, String)> = Vec::new();
-        loop {
-            let started = Instant::now();
-            match runner.snapshot() {
-                Ok(snapshot) => {
-                    paths = snapshot
-                        .workspaces
-                        .iter()
-                        .filter_map(|w| {
-                            w.worktree
-                                .as_ref()
-                                .map(|t| (w.workspace_id.clone(), t.checkout_path.clone()))
-                        })
-                        .collect();
-                    let latency_ms = started.elapsed().as_millis() as u64;
-                    if tx
-                        .send(Update::Snapshot {
-                            machine: id.clone(),
-                            snapshot,
-                            latency_ms,
-                        })
-                        .is_err()
-                    {
-                        return;
-                    }
-                }
-                Err(e) => {
-                    if tx
-                        .send(Update::Failed {
-                            machine: id.clone(),
-                            error: e.to_string(),
-                        })
-                        .is_err()
-                    {
-                        return;
-                    }
-                }
-            }
-            if last_git.elapsed() >= Duration::from_secs(30) {
-                last_git = Instant::now();
-                let info = runner.git_info(&paths);
-                if tx.send(Update::Git { machine: id.clone(), info }).is_err() {
-                    return;
-                }
-            }
-            std::thread::sleep(every.saturating_sub(started.elapsed()));
-        }
-    });
 }
 
 pub fn fetch_pane_text(machine: &Machine, pane_id: String, tx: Sender<Update>) {

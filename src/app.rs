@@ -3,10 +3,13 @@ use std::sync::mpsc::{Receiver, Sender};
 use std::time::{Duration, Instant};
 
 use anyhow::Result;
-use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
+use ratatui::layout::Rect;
 
 use crate::herdr::{self, Runner, Update};
-use crate::model::{build_rows, Action, Counts, Filter, Link, Machine, Row, Target};
+use crate::state::State;
+use crate::model::{build_rows, Action, Counts, Filter, Link, Machine, Row, Status, Target};
+use crate::pane_view::PaneView;
 
 pub struct Prompt {
     pub title: String,
@@ -34,6 +37,14 @@ pub enum Mode {
     Confirm(Confirm),
 }
 
+/// A pane streamed into paddock. `prefix` is set after ctrl+b, waiting for the chord key.
+pub struct Attached {
+    pub view: PaneView,
+    pub machine: String,
+    pub pane_id: String,
+    pub prefix: bool,
+}
+
 /// What the event loop must do outside the TUI after handling a key.
 pub enum Effect {
     None,
@@ -56,6 +67,11 @@ pub struct App {
     pub pane_text: HashMap<(String, String), String>,
     pub last_error: Option<String>,
     pub refreshed: Option<Instant>,
+    pub state: State,
+    pub list_area: Rect,
+    pub attached: Option<Attached>,
+    pub notice: Option<String>,
+    pub size: (u16, u16),
     tx: Sender<Update>,
     rx: Receiver<Update>,
     pane_text_requested: Option<(String, String)>,
@@ -69,7 +85,7 @@ impl App {
         machines.extend(herdr::saved_machines().unwrap_or_default());
         for m in &machines {
             let every = if m.local { poll_local } else { poll_remote };
-            herdr::spawn_poller(m, every, tx.clone());
+            crate::events::spawn_watcher(m, every, tx.clone());
         }
         let home = std::env::var("HOME").unwrap_or_default();
         let mut app = App {
@@ -86,6 +102,11 @@ impl App {
             pane_text: HashMap::new(),
             last_error: None,
             refreshed: None,
+            state: State::load(),
+            list_area: Rect::default(),
+            attached: None,
+            notice: None,
+            size: (80, 24),
             tx,
             rx,
             pane_text_requested: None,
@@ -103,10 +124,10 @@ impl App {
         match self.refreshed {
             Some(t) => {
                 let s = t.elapsed().as_secs();
-                if s < 2 {
+                if s < 25 {
                     "live".into()
                 } else {
-                    format!("{s}s ago")
+                    format!("stale · {s}s")
                 }
             }
             None => "connecting…".into(),
@@ -116,6 +137,14 @@ impl App {
     /// Drains poller updates. Returns true when something changed.
     pub fn pump(&mut self) -> bool {
         let mut changed = false;
+        if let Some(a) = &mut self.attached {
+            changed |= a.view.pump();
+            if let Some(reason) = a.view.closed() {
+                let reason = reason.to_owned();
+                self.detach(Some(format!("pane stream closed: {reason}")));
+                changed = true;
+            }
+        }
         while let Ok(u) = self.rx.try_recv() {
             changed = true;
             match u {
@@ -170,7 +199,7 @@ impl App {
             .get(self.selected)
             .filter(|_| self.user_moved)
             .map(|r| r.target.clone());
-        let built = build_rows(&self.machines, &self.query, self.filter, &self.home);
+        let built = build_rows(&self.machines, &self.query, self.filter, &self.home, &self.state.pinned);
         self.rows = built.rows;
         self.counts = built.counts;
         self.selected = keep
@@ -241,6 +270,26 @@ impl App {
 
     pub fn key(&mut self, k: KeyEvent) -> Effect {
         self.user_moved = true;
+        if let Some(a) = &mut self.attached {
+            let is_prefix = k.code == KeyCode::Char('b') && k.modifiers.contains(KeyModifiers::CONTROL);
+            if a.prefix {
+                a.prefix = false;
+                match k.code {
+                    KeyCode::Char('h') | KeyCode::Char('q') | KeyCode::Esc => self.detach(None),
+                    _ if is_prefix => a.view.key(k),
+                    _ => {
+                        a.view.key(KeyEvent::new(KeyCode::Char('b'), KeyModifiers::CONTROL));
+                        a.view.key(k);
+                    }
+                }
+            } else if is_prefix {
+                a.prefix = true;
+            } else {
+                a.view.key(k);
+            }
+            return Effect::None;
+        }
+        self.notice = None;
         match &mut self.mode {
             Mode::Normal => self.key_normal(k),
             Mode::Search => {
@@ -398,6 +447,12 @@ impl App {
                 }
                 _ => {}
             },
+            KeyCode::Char('p') => {
+                if let Some((machine, workspace_id)) = self.workspace_target(&target) {
+                    self.state.toggle_pin(&format!("{machine}:{workspace_id}"));
+                    self.rebuild();
+                }
+            }
             KeyCode::Char('D') => {
                 if let Some(Target::Workspace { machine, workspace_id }) = &target {
                     self.mode = Mode::Confirm(Confirm {
@@ -405,6 +460,83 @@ impl App {
                         argv: ["worktree", "remove", "--workspace", workspace_id].map(String::from).to_vec(),
                         machine: machine.clone(),
                     })
+                }
+            }
+            _ => {}
+        }
+        Effect::None
+    }
+
+    pub fn paste(&mut self, text: &str) {
+        match &mut self.attached {
+            Some(a) => a.view.paste(text),
+            None => match &mut self.mode {
+                Mode::Search => {
+                    self.query.push_str(text);
+                    self.rebuild();
+                }
+                Mode::Prompt(p) => p.input.push_str(text),
+                _ => {}
+            },
+        }
+    }
+
+    pub fn detach(&mut self, notice: Option<String>) {
+        if let Some(a) = self.attached.take() {
+            a.view.release();
+        }
+        self.notice = notice;
+        self.pane_text.clear();
+        self.rebuild();
+    }
+
+    /// Status line shown under an attached pane.
+    pub fn attached_status(&self) -> Option<String> {
+        let a = self.attached.as_ref()?;
+        let m = self.machine(&a.machine)?;
+        let p = m.snapshot.panes.iter().find(|p| p.pane_id == a.pane_id);
+        let ws = p.and_then(|p| m.snapshot.workspaces.iter().find(|w| w.workspace_id == p.workspace_id));
+        let agent = p.and_then(|p| p.agent.as_deref().map(|a| format!(" · {a} {}", p.agent_status.text())));
+        Some(format!(
+            " {} / {} / {}{}{}",
+            m.label,
+            ws.map(|w| w.label.as_str()).unwrap_or("?"),
+            a.pane_id,
+            agent.unwrap_or_default(),
+            if a.prefix { " · ctrl+b …" } else { "" }
+        ))
+    }
+
+    pub fn attached_agent_status(&self) -> Option<Status> {
+        let a = self.attached.as_ref()?;
+        let p = self.machine(&a.machine)?.snapshot.panes.iter().find(|p| p.pane_id == a.pane_id)?;
+        p.agent.as_ref().map(|_| p.agent_status)
+    }
+
+    pub fn mouse(&mut self, m: MouseEvent) -> Effect {
+        if let Some(a) = &mut self.attached {
+            a.view.mouse(m, (0, 0));
+            return Effect::None;
+        }
+        if !matches!(self.mode, Mode::Normal) {
+            return Effect::None;
+        }
+        match m.kind {
+            MouseEventKind::ScrollDown => self.step(1),
+            MouseEventKind::ScrollUp => self.step(-1),
+            MouseEventKind::Down(MouseButton::Left) => {
+                let a = self.list_area;
+                if m.column >= a.x && m.column < a.right() && m.row >= a.y && m.row < a.bottom() {
+                    let ix = self.scroll + (m.row - a.y) as usize;
+                    if self.rows.get(ix).is_some_and(|r| r.selectable()) {
+                        if ix == self.selected {
+                            let target = self.rows[ix].target.clone();
+                            return self.open(Some(target));
+                        }
+                        self.user_moved = true;
+                        self.selected = ix;
+                        self.request_pane_text();
+                    }
                 }
             }
             _ => {}
@@ -492,10 +624,21 @@ impl App {
             return Effect::None;
         };
         let runner = Runner::for_machine(m);
-        let argv = runner.attach_argv(&p.terminal_id);
-        let _ = runner.json(&["pane", "focus", pane_id]);
-        self.last_pane = Some((machine.to_owned(), pane_id.to_owned()));
-        Effect::Exec(argv)
+        let (cols, rows) = (self.size.0, self.size.1.saturating_sub(1).max(1));
+        match PaneView::open(&runner, &p.pane_id, cols, rows) {
+            Ok(view) => {
+                let _ = runner.json(&["pane", "focus", pane_id]);
+                self.last_pane = Some((machine.to_owned(), pane_id.to_owned()));
+                self.attached = Some(Attached {
+                    view,
+                    machine: machine.to_owned(),
+                    pane_id: pane_id.to_owned(),
+                    prefix: false,
+                });
+            }
+            Err(e) => self.notice = Some(format!("attach failed: {e}")),
+        }
+        Effect::None
     }
 
     fn submit(&mut self, p: Prompt) {

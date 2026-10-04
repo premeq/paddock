@@ -1,6 +1,9 @@
 mod app;
+mod events;
 mod herdr;
 mod model;
+mod pane_view;
+mod state;
 mod theme;
 mod ui;
 
@@ -8,7 +11,10 @@ use std::process::Command;
 use std::time::Duration;
 
 use anyhow::{Context, Result};
-use ratatui::crossterm::event::{self, Event, KeyEventKind};
+use ratatui::crossterm::event::{
+    self, DisableBracketedPaste, DisableMouseCapture, EnableBracketedPaste, EnableMouseCapture, Event, KeyEventKind,
+};
+use ratatui::crossterm::execute;
 use ratatui::DefaultTerminal;
 
 use app::{App, Effect};
@@ -21,10 +27,21 @@ fn main() -> Result<()> {
     let local = arg_secs("--local-poll").unwrap_or(1.0);
     let remote = arg_secs("--remote-poll").unwrap_or(3.0);
     let mut app = App::new(Duration::from_secs_f64(local), Duration::from_secs_f64(remote))?;
-    let mut terminal = ratatui::init();
+    let mut terminal = init();
     let result = run(&mut terminal, &mut app);
-    ratatui::restore();
+    restore();
     result
+}
+
+fn init() -> DefaultTerminal {
+    let terminal = ratatui::init();
+    let _ = execute!(std::io::stdout(), EnableMouseCapture, EnableBracketedPaste);
+    terminal
+}
+
+fn restore() {
+    let _ = execute!(std::io::stdout(), DisableMouseCapture, DisableBracketedPaste);
+    ratatui::restore();
 }
 
 fn arg_secs(flag: &str) -> Option<f64> {
@@ -37,10 +54,12 @@ fn run(terminal: &mut DefaultTerminal, app: &mut App) -> Result<()> {
     loop {
         terminal.draw(|f| ui::draw(f, app))?;
         let mut effect = Effect::None;
-        if event::poll(Duration::from_millis(250))? {
+        let tick = if app.attached.is_some() { 16 } else { 250 };
+        if event::poll(Duration::from_millis(tick))? {
             match event::read()? {
                 Event::Key(k) if k.kind != KeyEventKind::Release => effect = app.key(k),
-                Event::Mouse(_) => {}
+                Event::Mouse(m) => effect = app.mouse(m),
+                Event::Paste(text) => app.paste(&text),
                 _ => {}
             }
         }
@@ -49,12 +68,12 @@ fn run(terminal: &mut DefaultTerminal, app: &mut App) -> Result<()> {
             Effect::None => {}
             Effect::Quit => return Ok(()),
             Effect::Exec(argv) => {
-                ratatui::restore();
+                restore();
                 let status = Command::new(&argv[0])
                     .args(&argv[1..])
                     .status()
                     .with_context(|| format!("run {}", argv.join(" ")));
-                *terminal = ratatui::init();
+                *terminal = init();
                 if let Err(e) = status {
                     app.last_error = Some(e.to_string());
                 }

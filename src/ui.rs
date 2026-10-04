@@ -31,25 +31,27 @@ fn tone(t: Tone) -> ratatui::style::Color {
 
 pub fn draw(f: &mut Frame, app: &mut App) {
     let area = f.area();
+    app.size = (area.width, area.height);
     f.buffer_mut().set_style(area, Style::default().bg(T.bg).fg(T.text));
-    if area.height < 8 || area.width < 40 {
+    if app.attached.is_some() {
+        draw_attached(f, area, app);
+        return;
+    }
+    if area.height < 12 || area.width < 40 {
         Paragraph::new("terminal too small").render(area, f.buffer_mut());
         return;
     }
     let header = Rect::new(area.x, area.y, area.width, 1);
     let footer = Rect::new(area.x, area.bottom() - 2, area.width, 2);
     let body = Rect::new(area.x, area.y + 2, area.width, area.height - 5);
+    let detail_h = (body.height * 2 / 5).clamp(8, 16);
+    let tree = Rect::new(body.x + 1, body.y, body.width - 2, body.height - detail_h - 1);
+    let detail = Rect::new(body.x + 1, tree.bottom() + 1, body.width - 2, detail_h);
     draw_header(f.buffer_mut(), header, app);
     hline(f.buffer_mut(), area.y + 1, area);
     hline(f.buffer_mut(), footer.y - 1, area);
-
-    let detail_w = if body.width >= 110 { 52 } else if body.width >= 84 { body.width / 3 } else { 0 };
-    let tree = Rect::new(body.x + 1, body.y, body.width.saturating_sub(detail_w + 3), body.height);
     draw_tree(f.buffer_mut(), tree, app);
-    if detail_w > 0 {
-        let detail = Rect::new(tree.right() + 2, body.y, detail_w, body.height);
-        draw_detail(f.buffer_mut(), detail, app);
-    }
+    draw_detail(f.buffer_mut(), detail, app);
     draw_footer(f.buffer_mut(), footer, app);
     if let Mode::Prompt(p) = &app.mode {
         draw_prompt(f, area, &p.title, &p.input);
@@ -57,6 +59,28 @@ pub fn draw(f: &mut Frame, app: &mut App) {
     if let Mode::Confirm(c) = &app.mode {
         draw_prompt(f, area, &c.title, "y to confirm, any other key to cancel");
     }
+}
+
+fn draw_attached(f: &mut Frame, area: Rect, app: &mut App) {
+    let pane = Rect::new(area.x, area.y, area.width, area.height.saturating_sub(1));
+    let bar = Rect::new(area.x, pane.bottom(), area.width, 1);
+    let status = app.attached_status().unwrap_or_default();
+    let color = app.attached_agent_status().map(status_color).unwrap_or(T.sub);
+    if let Some(a) = &mut app.attached {
+        a.view.resize(pane.width, pane.height);
+        a.view.render(pane, f.buffer_mut());
+        if let Some((x, y)) = a.view.cursor(pane) {
+            f.set_cursor_position((x, y));
+        }
+    }
+    f.buffer_mut().set_style(bar, Style::default().fg(T.dim));
+    f.buffer_mut().set_line(bar.x, bar.y, &Line::from(Span::styled(status, Style::default().fg(color))), bar.width);
+    put_right(
+        f.buffer_mut(),
+        bar,
+        bar.y,
+        vec![Span::styled("ctrl+b h → home · ctrl+b ctrl+b → literal ", Style::default().fg(T.dim))],
+    );
 }
 
 fn hline(buf: &mut Buffer, y: u16, area: Rect) {
@@ -103,12 +127,9 @@ fn draw_header(buf: &mut Buffer, area: Rect, app: &App) {
         }
     }
     buf.set_line(area.x, area.y, &Line::from(spans), area.width);
-    let right = match &app.last_error {
+    let right = match app.last_error.as_ref().or(app.notice.as_ref()) {
         Some(e) => Span::styled(format!("{e} "), Style::default().fg(T.red)),
-        None => Span::styled(
-            format!("{} ", app.refreshed_ago()),
-            Style::default().fg(T.dim),
-        ),
+        None => Span::styled(format!("{} ", app.refreshed_ago()), Style::default().fg(T.dim)),
     };
     put_right(buf, area, area.y, vec![right]);
 }
@@ -138,6 +159,7 @@ fn draw_tree(buf: &mut Buffer, area: Rect, app: &mut App) {
     buf.set_string(area.x, area.y + 1, "─".repeat(area.width as usize), Style::default().fg(T.line));
 
     let list = Rect::new(area.x, area.y + 2, area.width, area.height.saturating_sub(2));
+    app.list_area = list;
     let visible = list.height as usize;
     if app.selected >= app.scroll + visible {
         app.scroll = app.selected + 1 - visible;
@@ -218,59 +240,85 @@ fn draw_detail(buf: &mut Buffer, area: Rect, app: &App) {
     };
     let title = match &row.target {
         Target::Action(_) => "paddock".to_owned(),
-        _ => row.label.clone(),
+        _ => row.label.trim_start_matches("★ ").to_owned(),
     };
-    let block = Block::default()
-        .borders(Borders::ALL)
-        .border_style(Style::default().fg(T.line))
-        .title(Span::styled(
-            format!(" {title} "),
-            Style::default().fg(T.accent).add_modifier(Modifier::BOLD),
-        ));
-    let inner = block.inner(area);
-    block.render(area, buf);
-    let mut lines: Vec<Line> = Vec::new();
-    let key = |k: &str| Span::styled(format!("{k:<9}"), Style::default().fg(T.dim));
-    let val = |v: String| Span::styled(v, Style::default().fg(T.text));
-    let head = |h: &str| {
-        Line::from(Span::styled(
-            h.to_owned(),
-            Style::default().fg(T.sub).add_modifier(Modifier::BOLD),
-        ))
+    let rule = Line::from(vec![
+        Span::styled("─ ", Style::default().fg(T.line)),
+        Span::styled(title.clone(), Style::default().fg(T.accent).add_modifier(Modifier::BOLD)),
+        Span::styled(
+            format!(" {}", "─".repeat((area.width as usize).saturating_sub(title.width() + 3))),
+            Style::default().fg(T.line),
+        ),
+    ]);
+    buf.set_line(area.x, area.y, &rule, area.width);
+    let inner = Rect::new(area.x, area.y + 1, area.width, area.height - 1);
+    let gap = 3;
+    let left_w = if inner.width >= 90 { inner.width / 2 } else { inner.width };
+    let left = Rect::new(inner.x, inner.y, left_w, inner.height);
+    let right = if inner.width >= 90 {
+        Some(Rect::new(inner.x + left_w + gap, inner.y, inner.width - left_w - gap, inner.height))
+    } else {
+        None
     };
+    let (facts, extra) = detail_lines(app, row, right.map_or(left.width, |r| r.width) as usize);
+    Paragraph::new(facts).render(left, buf);
+    match right {
+        Some(r) => Paragraph::new(extra).render(r, buf),
+        None => {}
+    }
+}
+
+fn kv<'a>(k: &str, v: String) -> Line<'a> {
+    Line::from(vec![
+        Span::styled(format!("{k:<9}"), Style::default().fg(T.dim)),
+        Span::styled(v, Style::default().fg(T.text)),
+    ])
+}
+
+fn head<'a>(h: &str) -> Line<'a> {
+    Line::from(Span::styled(h.to_owned(), Style::default().fg(T.sub).add_modifier(Modifier::BOLD)))
+}
+
+/// Left column: facts and members. Right column: screen or actions.
+fn detail_lines<'a>(app: &'a App, row: &'a crate::model::Row, right_w: usize) -> (Vec<Line<'a>>, Vec<Line<'a>>) {
+    let mut facts: Vec<Line> = Vec::new();
+    let mut extra: Vec<Line> = Vec::new();
     let home = app.home.as_str();
+    let val = |v: String| Span::styled(v, Style::default().fg(T.text));
     match &row.target {
         Target::Machine { machine } => {
             if let Some(m) = app.machine(machine) {
-                lines.push(Line::from(vec![key("link"), val(link_text(m.link))]));
+                facts.push(kv("link", link_text(m.link)));
                 if let Some(t) = &m.ssh_target {
-                    lines.push(Line::from(vec![key("ssh"), val(t.clone())]));
+                    facts.push(kv("ssh", t.clone()));
                 }
                 if let Some(s) = &m.session {
-                    lines.push(Line::from(vec![key("session"), val(s.clone())]));
+                    facts.push(kv("session", s.clone()));
                 }
                 if let Some(ms) = m.latency_ms {
-                    lines.push(Line::from(vec![key("latency"), val(format!("{ms} ms"))]));
+                    facts.push(kv("latency", format!("{ms} ms")));
                 }
                 if let Some(e) = &m.error {
-                    lines.push(Line::from(vec![key("error"), Span::styled(e.clone(), Style::default().fg(T.red))]));
+                    facts.push(Line::from(vec![
+                        Span::styled(format!("{:<9}", "error"), Style::default().fg(T.dim)),
+                        Span::styled(e.clone(), Style::default().fg(T.red)),
+                    ]));
                 }
-                lines.push(Line::default());
-                lines.push(Line::from(vec![
-                    key("spaces"),
-                    val(m.snapshot.workspaces.len().to_string()),
-                ]));
-                lines.push(Line::from(vec![key("panes"), val(m.snapshot.panes.len().to_string())]));
+                facts.push(kv("spaces", m.snapshot.workspaces.len().to_string()));
+                facts.push(kv("panes", m.snapshot.panes.len().to_string()));
+                extra.push(head("actions"));
+                extra.push(action_line("n", "new space here"));
+                extra.push(action_line("t", "new worktree here"));
             }
         }
         Target::Workspace { machine, workspace_id } => {
             if let Some(m) = app.machine(machine) {
                 if let Some(ws) = m.snapshot.workspaces.iter().find(|w| &w.workspace_id == workspace_id) {
-                    lines.push(Line::from(vec![key("machine"), val(m.label.clone())]));
+                    facts.push(kv("machine", m.label.clone()));
                     if let Some(t) = &ws.worktree {
-                        lines.push(Line::from(vec![key("path"), val(shorten_path(&t.checkout_path, home, 40))]));
+                        facts.push(kv("path", shorten_path(&t.checkout_path, home, 48)));
                         if t.is_linked_worktree {
-                            lines.push(Line::from(vec![key("repo"), val(t.repo_name.clone())]));
+                            facts.push(kv("repo", t.repo_name.clone()));
                         }
                     }
                     if let Some(g) = m.git.get(workspace_id) {
@@ -281,49 +329,44 @@ fn draw_detail(buf: &mut Buffer, area: Rect, app: &App) {
                         if g.changed > 0 {
                             b.push_str(&format!(" · {} changed", g.changed));
                         }
-                        lines.push(Line::from(vec![key("branch"), val(b)]));
+                        facts.push(kv("branch", b));
                     }
-                    lines.push(Line::default());
-                    lines.push(head("agents"));
+                    facts.push(head("agents"));
                     let mut any = false;
                     for p in m.snapshot.panes.iter().filter(|p| &p.workspace_id == workspace_id) {
                         if let Some(a) = &p.agent {
                             any = true;
-                            lines.push(Line::from(vec![
-                                Span::styled(
-                                    format!("{} ", p.agent_status.dot()),
-                                    Style::default().fg(status_color(p.agent_status)),
-                                ),
+                            facts.push(Line::from(vec![
+                                Span::styled(format!("{} ", p.agent_status.dot()), Style::default().fg(status_color(p.agent_status))),
                                 val(format!("{a} · {}", p.agent_status.text())),
-                                Span::styled(format!("  {}", p.pane_id), Style::default().fg(T.dim)),
+                                Span::styled(
+                                    p.terminal_title_stripped.as_deref().map(|t| format!("  {t}")).unwrap_or_default(),
+                                    Style::default().fg(T.dim),
+                                ),
                             ]));
                         }
                     }
                     if !any {
-                        lines.push(Line::from(Span::styled("none", Style::default().fg(T.dim))));
+                        facts.push(Line::from(Span::styled("none", Style::default().fg(T.dim))));
                     }
-                    lines.push(Line::default());
-                    lines.push(head("tabs"));
+                    extra.push(head("tabs"));
                     for t in m.snapshot.tabs.iter().filter(|t| &t.workspace_id == workspace_id) {
-                        lines.push(Line::from(vec![
+                        extra.push(Line::from(vec![
                             val(t.label.clone()),
-                            Span::styled(
-                                format!("  {} {}", t.pane_count, plural(t.pane_count as usize, "pane")),
-                                Style::default().fg(T.dim),
-                            ),
+                            Span::styled(format!("  {} {}", t.pane_count, plural(t.pane_count as usize, "pane")), Style::default().fg(T.dim)),
                         ]));
                     }
-                    lines.push(Line::default());
-                    lines.push(head("actions"));
+                    extra.push(head("actions"));
                     for (k, v) in [
                         ("enter", "open"),
-                        ("c", "new tab here"),
+                        ("c", "new tab"),
                         ("t", "new worktree from here"),
                         ("r", "rename"),
-                        ("x", "close workspace"),
+                        ("p", "pin"),
+                        ("x", "close"),
                         ("D", "delete worktree checkout"),
                     ] {
-                        lines.push(action_line(k, v));
+                        extra.push(action_line(k, v));
                     }
                 }
             }
@@ -331,62 +374,64 @@ fn draw_detail(buf: &mut Buffer, area: Rect, app: &App) {
         Target::Pane { machine, pane_id } => {
             if let Some(m) = app.machine(machine) {
                 if let Some(p) = m.snapshot.panes.iter().find(|p| &p.pane_id == pane_id) {
-                    lines.push(Line::from(vec![key("machine"), val(m.label.clone())]));
-                    lines.push(Line::from(vec![key("pane"), val(p.pane_id.clone())]));
-                    lines.push(Line::from(vec![key("cwd"), val(shorten_path(p.cwd(), home, 40))]));
+                    facts.push(kv("machine", m.label.clone()));
+                    facts.push(kv("pane", p.pane_id.clone()));
+                    facts.push(kv("cwd", shorten_path(p.cwd(), home, 48)));
                     if let Some(a) = &p.agent {
-                        lines.push(Line::from(vec![
-                            key("agent"),
+                        facts.push(Line::from(vec![
+                            Span::styled(format!("{:<9}", "agent"), Style::default().fg(T.dim)),
                             val(a.clone()),
                             Span::raw(" · "),
-                            Span::styled(
-                                p.agent_status.text(),
-                                Style::default().fg(status_color(p.agent_status)),
-                            ),
+                            Span::styled(p.agent_status.text(), Style::default().fg(status_color(p.agent_status))),
                         ]));
                     }
                     if let Some(t) = &p.terminal_title_stripped {
-                        lines.push(Line::from(vec![key("title"), val(t.clone())]));
+                        facts.push(kv(if p.agent.is_some() { "topic" } else { "title" }, t.clone()));
                     }
-                    lines.push(Line::default());
-                    lines.push(head("screen"));
+                    facts.push(head("actions"));
+                    for (k, v) in [("enter", "attach"), ("r", "rename"), ("x", "close")] {
+                        facts.push(action_line(k, v));
+                    }
+                    extra.push(head("screen"));
                     match app.pane_text.get(&(machine.clone(), pane_id.clone())) {
                         Some(text) => {
-                            for l in text.lines().filter(|l| !l.trim().is_empty()).rev().take(6).collect::<Vec<_>>().into_iter().rev() {
-                                let l: String = l.chars().take(inner.width as usize).collect();
-                                lines.push(Line::from(Span::styled(l, Style::default().fg(T.dim))));
+                            for l in screen_tail(text, 12) {
+                                let l: String = l.chars().take(right_w).collect();
+                                extra.push(Line::from(Span::styled(l, Style::default().fg(T.sub))));
                             }
                         }
-                        None => lines.push(Line::from(Span::styled("…", Style::default().fg(T.dim)))),
-                    }
-                    lines.push(Line::default());
-                    lines.push(head("actions"));
-                    for (k, v) in [("enter", "attach"), ("r", "rename pane"), ("x", "close pane")] {
-                        lines.push(action_line(k, v));
+                        None => extra.push(Line::from(Span::styled("…", Style::default().fg(T.dim)))),
                     }
                 }
             }
         }
         Target::Action(_) => {
-            lines.push(Line::from(val("Home screen for your herdr fleet.".into())));
-            lines.push(Line::default());
-            lines.push(head("keys"));
+            facts.push(Line::from(val("Home screen for your herdr fleet.".into())));
+            facts.push(head("keys"));
+            for (k, v) in [("↑↓ j k", "move"), ("← →", "previous / next space"), ("enter", "open"), ("esc", "back to last pane"), ("/", "search"), ("q", "quit")] {
+                facts.push(action_line(k, v));
+            }
+            extra.push(head("more keys"));
             for (k, v) in [
-                ("↑↓ j k", "move"),
-                ("← →", "previous / next space"),
-                ("enter", "open"),
-                ("esc", "back to last pane"),
-                ("/", "search"),
                 ("a b w i d", "filter: all blocked working idle done"),
                 ("n t m", "new space, new worktree, connect machine"),
-                ("c r x D", "new tab, rename, close, delete worktree"),
-                ("q", "quit"),
+                ("c r p x D", "new tab, rename, pin, close, delete worktree"),
             ] {
-                lines.push(action_line(k, v));
+                extra.push(action_line(k, v));
             }
         }
     }
-    Paragraph::new(lines).render(inner, buf);
+    (facts, extra)
+}
+
+/// Last meaningful screen lines: drops blank lines and pure chrome (rules, boxes).
+fn screen_tail(text: &str, n: usize) -> Vec<&str> {
+    let chrome = |l: &str| {
+        let t = l.trim();
+        t.is_empty() || t.chars().all(|c| matches!(c, '─' | '━' | '│' | '╭' | '╮' | '╰' | '╯' | '┌' | '┐' | '└' | '┘' | '═' | ' ' | '❯' | '>'))
+    };
+    let kept: Vec<&str> = text.lines().filter(|l| !chrome(l)).collect();
+    kept[kept.len().saturating_sub(n)..].to_vec()
 }
 
 fn action_line<'a>(k: &str, v: &str) -> Line<'a> {
