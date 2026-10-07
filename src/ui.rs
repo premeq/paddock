@@ -75,7 +75,7 @@ fn draw_attached(f: &mut Frame, area: Rect, app: &mut App) {
         spans.push(Span::styled(format!("{kind} "), Style::default().fg(T.dim)));
         spans.push(Span::styled(status.text(), Style::default().fg(status_color(status))));
     }
-    let clock = utc_clock();
+    let clock = format!("| {}", utc_clock());
     f.buffer_mut().set_line(header.x, header.y, &Line::from(spans), header.width.saturating_sub(clock.width() as u16 + 1));
     put_right(f.buffer_mut(), header, header.y, vec![Span::styled(clock, Style::default().fg(T.dim))]);
     hline(f.buffer_mut(), area.y + 1, area);
