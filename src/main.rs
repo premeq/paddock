@@ -80,7 +80,7 @@ fn run(terminal: &mut DefaultTerminal, app: &mut App) -> Result<()> {
                     .with_context(|| format!("run {}", argv.join(" ")));
                 *terminal = init();
                 if let Err(e) = status {
-                    app.last_error = Some(e.to_string());
+                    app.notice = Some(e.to_string());
                 }
                 app.pane_text.clear();
                 app.reload_machines();

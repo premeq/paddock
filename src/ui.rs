@@ -59,6 +59,49 @@ pub fn draw(f: &mut Frame, app: &mut App) {
     if let Mode::Confirm(c) = &app.mode {
         draw_prompt(f, area, &c.title, "y to confirm, any other key to cancel");
     }
+    if let Some(n) = &app.notice {
+        draw_notice(f.buffer_mut(), area, n);
+    }
+}
+
+fn draw_notice(buf: &mut Buffer, area: Rect, text: &str) {
+    let w = area.width.saturating_sub(4).min(70);
+    let mut lines: Vec<Line> = wrap(text, w.saturating_sub(4) as usize)
+        .into_iter()
+        .map(|l| Line::from(Span::styled(l, Style::default().fg(T.text))))
+        .collect();
+    lines.truncate(area.height.saturating_sub(8) as usize);
+    lines.push(Line::default());
+    lines.push(Line::from(Span::styled("any key to close", Style::default().fg(T.dim))));
+    let h = lines.len() as u16 + 2;
+    let rect = Rect::new(area.x + (area.width - w) / 2, area.y + area.height.saturating_sub(h) / 2, w, h);
+    Clear.render(rect, buf);
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(T.red))
+        .style(Style::default().bg(T.bg))
+        .title(Span::styled(" error ", Style::default().fg(T.red)));
+    let inner = block.inner(rect);
+    block.render(rect, buf);
+    Paragraph::new(lines).render(Rect::new(inner.x + 1, inner.y, inner.width.saturating_sub(2), inner.height), buf);
+}
+
+fn wrap(text: &str, width: usize) -> Vec<String> {
+    let mut out = Vec::new();
+    for para in text.lines() {
+        let mut line = String::new();
+        for word in para.split_whitespace() {
+            if !line.is_empty() && line.width() + 1 + word.width() > width {
+                out.push(std::mem::take(&mut line));
+            }
+            if !line.is_empty() {
+                line.push(' ');
+            }
+            line.push_str(word);
+        }
+        out.push(line);
+    }
+    out
 }
 
 fn draw_attached(f: &mut Frame, area: Rect, app: &mut App) {
@@ -142,15 +185,11 @@ fn draw_header(buf: &mut Buffer, area: Rect, app: &App) {
         }
     }
     let clock = utc_clock();
-    let note = match app.last_error.as_ref().or(app.notice.as_ref()) {
-        Some(e) => Span::styled(format!("{e}   "), Style::default().fg(T.red)),
-        None => match app.health() {
-            h if h.is_empty() => Span::raw(""),
-            h => Span::styled(format!("{h}   "), Style::default().fg(T.dim)),
-        },
+    let health = app.health();
+    let note = match health.chars().take((area.width as usize / 2).saturating_sub(clock.width() + 3)).collect::<String>() {
+        h if h.is_empty() => Span::raw(""),
+        h => Span::styled(format!("{h}   "), Style::default().fg(T.dim)),
     };
-    let note_w = note.content.width().min((area.width as usize / 2).saturating_sub(clock.width()));
-    let note = Span::styled(note.content.chars().take(note_w).collect::<String>(), note.style);
     let right_w = note.content.width() + clock.width();
     set_line_clipped(buf, area.x, area.y, spans, area.width.saturating_sub(right_w as u16 + 1));
     put_right(buf, area, area.y, vec![note, Span::styled(clock, Style::default().fg(T.dim))]);
@@ -363,10 +402,13 @@ fn detail_lines<'a>(app: &'a App, row: &'a crate::model::Row, right_w: usize, ri
                     facts.push(kv("latency", format!("{ms} ms")));
                 }
                 if let Some(e) = &m.error {
-                    facts.push(Line::from(vec![
-                        Span::styled(format!("{:<9}", "error"), Style::default().fg(T.dim)),
-                        Span::styled(e.clone(), Style::default().fg(T.red)),
-                    ]));
+                    for (i, l) in wrap(e, right_w.saturating_sub(9).max(20)).into_iter().enumerate() {
+                        let k = if i == 0 { "error" } else { "" };
+                        facts.push(Line::from(vec![
+                            Span::styled(format!("{k:<9}"), Style::default().fg(T.dim)),
+                            Span::styled(l, Style::default().fg(T.red)),
+                        ]));
+                    }
                 }
                 facts.push(kv("spaces", m.snapshot.workspaces.len().to_string()));
                 facts.push(kv("panes", m.snapshot.panes.len().to_string()));

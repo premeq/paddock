@@ -65,7 +65,6 @@ pub struct App {
     pub home: String,
     pub last_pane: Option<(String, String)>,
     pub pane_text: HashMap<(String, String), String>,
-    pub last_error: Option<String>,
     pub refreshed: Option<Instant>,
     pub state: State,
     pub list_area: Rect,
@@ -104,7 +103,6 @@ impl App {
             home,
             last_pane: None,
             pane_text: HashMap::new(),
-            last_error: None,
             refreshed: None,
             state: State::load(),
             list_area: Rect::default(),
@@ -138,7 +136,6 @@ impl App {
             home: "/home/alex".into(),
             last_pane: None,
             pane_text: crate::demo::screens(),
-            last_error: None,
             refreshed: Some(Instant::now()),
             state: State::default(),
             list_area: Rect::default(),
@@ -203,7 +200,6 @@ impl App {
                         m.error = None;
                         if m.local {
                             self.refreshed = Some(Instant::now());
-                            self.last_error = None;
                         }
                     }
                 }
@@ -215,10 +211,7 @@ impl App {
                 Update::Failed { machine, error } => {
                     if let Some(m) = self.machines.iter_mut().find(|m| m.id == machine) {
                         m.link = Link::Offline;
-                        m.error = Some(error.clone());
-                        if m.local {
-                            self.last_error = Some(error);
-                        }
+                        m.error = Some(error);
                     }
                 }
                 Update::PaneText {
@@ -325,7 +318,9 @@ impl App {
             }
             return Effect::None;
         }
-        self.notice = None;
+        if self.notice.take().is_some() {
+            return Effect::None;
+        }
         match &mut self.mode {
             Mode::Normal => self.key_normal(k),
             Mode::Search => {
@@ -557,6 +552,12 @@ impl App {
             a.view.mouse(m, (0, 2));
             return Effect::None;
         }
+        if self.notice.is_some() {
+            if matches!(m.kind, MouseEventKind::Down(_)) {
+                self.notice = None;
+            }
+            return Effect::None;
+        }
         if !matches!(self.mode, Mode::Normal) {
             return Effect::None;
         }
@@ -741,12 +742,11 @@ impl App {
         }
         match Runner::for_machine(m).json(&args) {
             Ok(_) => {
-                self.last_error = None;
                 if let Some(w) = self.wake.get(machine) {
                     let _ = w.send(());
                 }
             }
-            Err(e) => self.last_error = Some(e.to_string()),
+            Err(e) => self.notice = Some(e.to_string()),
         }
     }
 }
