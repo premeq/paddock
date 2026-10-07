@@ -76,7 +76,7 @@ fn draw_attached(f: &mut Frame, area: Rect, app: &mut App) {
         spans.push(Span::styled(status.text(), Style::default().fg(status_color(status))));
     }
     let clock = utc_clock();
-    f.buffer_mut().set_line(header.x, header.y, &Line::from(spans), header.width.saturating_sub(clock.width() as u16 + 1));
+    set_line_clipped(f.buffer_mut(), header.x, header.y, spans, header.width.saturating_sub(clock.width() as u16 + 1));
     put_right(f.buffer_mut(), header, header.y, vec![Span::styled(clock, Style::default().fg(T.dim))]);
     hline(f.buffer_mut(), area.y + 1, area);
     if let Some(a) = &mut app.attached {
@@ -90,6 +90,16 @@ fn draw_attached(f: &mut Frame, area: Rect, app: &mut App) {
 
 fn hline(buf: &mut Buffer, y: u16, area: Rect) {
     buf.set_string(area.x, y, "─".repeat(area.width as usize), Style::default().fg(T.line));
+}
+
+fn set_line_clipped(buf: &mut Buffer, x: u16, y: u16, spans: Vec<Span>, width: u16) {
+    let w: usize = spans.iter().map(|s| s.content.width()).sum();
+    if w <= width as usize {
+        buf.set_line(x, y, &Line::from(spans), width);
+    } else if width > 0 {
+        buf.set_line(x, y, &Line::from(spans), width - 1);
+        buf.set_string(x + width - 1, y, "…", Style::default().fg(T.dim));
+    }
 }
 
 fn put_right(buf: &mut Buffer, area: Rect, y: u16, spans: Vec<Span>) {
@@ -133,16 +143,16 @@ fn draw_header(buf: &mut Buffer, area: Rect, app: &App) {
     }
     let clock = utc_clock();
     let note = match app.last_error.as_ref().or(app.notice.as_ref()) {
-        Some(e) => Span::styled(format!("{e} "), Style::default().fg(T.red)),
+        Some(e) => Span::styled(format!("{e}   "), Style::default().fg(T.red)),
         None => match app.health() {
             h if h.is_empty() => Span::raw(""),
-            h => Span::styled(format!("{h} "), Style::default().fg(T.dim)),
+            h => Span::styled(format!("{h}   "), Style::default().fg(T.dim)),
         },
     };
     let note_w = note.content.width().min((area.width as usize / 2).saturating_sub(clock.width()));
     let note = Span::styled(note.content.chars().take(note_w).collect::<String>(), note.style);
     let right_w = note.content.width() + clock.width();
-    buf.set_line(area.x, area.y, &Line::from(spans), area.width.saturating_sub(right_w as u16 + 1));
+    set_line_clipped(buf, area.x, area.y, spans, area.width.saturating_sub(right_w as u16 + 1));
     put_right(buf, area, area.y, vec![note, Span::styled(clock, Style::default().fg(T.dim))]);
 }
 
@@ -161,7 +171,7 @@ fn utc_clock() -> String {
     let d = doy - (153 * mp + 2) / 5 + 1;
     let m = if mp < 10 { mp + 3 } else { mp - 9 };
     let y = yoe + era * 400 + i64::from(m <= 2);
-    format!("| {y:04}-{m:02}-{d:02} {:02}:{:02} UTC ", rem / 3600, rem % 3600 / 60)
+    format!("{y:04}-{m:02}-{d:02} {:02}:{:02} UTC ", rem / 3600, rem % 3600 / 60)
 }
 
 fn plural(n: usize, w: &str) -> String {
