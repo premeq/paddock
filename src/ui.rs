@@ -75,7 +75,7 @@ fn draw_attached(f: &mut Frame, area: Rect, app: &mut App) {
         spans.push(Span::styled(format!("{kind} "), Style::default().fg(T.dim)));
         spans.push(Span::styled(status.text(), Style::default().fg(status_color(status))));
     }
-    let clock = format!("| {}", utc_clock());
+    let clock = utc_clock();
     f.buffer_mut().set_line(header.x, header.y, &Line::from(spans), header.width.saturating_sub(clock.width() as u16 + 1));
     put_right(f.buffer_mut(), header, header.y, vec![Span::styled(clock, Style::default().fg(T.dim))]);
     hline(f.buffer_mut(), area.y + 1, area);
@@ -133,10 +133,10 @@ fn draw_header(buf: &mut Buffer, area: Rect, app: &App) {
     }
     let clock = utc_clock();
     let note = match app.last_error.as_ref().or(app.notice.as_ref()) {
-        Some(e) => Span::styled(format!("{e}   "), Style::default().fg(T.red)),
+        Some(e) => Span::styled(format!("{e} "), Style::default().fg(T.red)),
         None => match app.health() {
             h if h.is_empty() => Span::raw(""),
-            h => Span::styled(format!("{h}   "), Style::default().fg(T.dim)),
+            h => Span::styled(format!("{h} "), Style::default().fg(T.dim)),
         },
     };
     let note_w = note.content.width().min((area.width as usize / 2).saturating_sub(clock.width()));
@@ -161,7 +161,7 @@ fn utc_clock() -> String {
     let d = doy - (153 * mp + 2) / 5 + 1;
     let m = if mp < 10 { mp + 3 } else { mp - 9 };
     let y = yoe + era * 400 + i64::from(m <= 2);
-    format!("{y:04}-{m:02}-{d:02} {:02}:{:02} UTC ", rem / 3600, rem % 3600 / 60)
+    format!("| {y:04}-{m:02}-{d:02} {:02}:{:02} UTC ", rem / 3600, rem % 3600 / 60)
 }
 
 fn plural(n: usize, w: &str) -> String {
