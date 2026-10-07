@@ -536,9 +536,6 @@ impl App {
         };
         let mut crumbs = vec![m.label.clone()];
         if let Some(p) = m.snapshot.panes.iter().find(|p| p.pane_id == a.pane_id) {
-            if let Some(ws) = m.snapshot.workspaces.iter().find(|w| w.workspace_id == p.workspace_id) {
-                crumbs.push(ws.label.clone());
-            }
             if let Some(t) = m.snapshot.tabs.iter().find(|t| t.tab_id == p.tab_id) {
                 crumbs.push(t.label.clone());
             }

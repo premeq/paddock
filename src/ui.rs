@@ -75,9 +75,9 @@ fn draw_attached(f: &mut Frame, area: Rect, app: &mut App) {
         spans.push(Span::styled(format!("{kind} "), Style::default().fg(T.dim)));
         spans.push(Span::styled(status.text(), Style::default().fg(status_color(status))));
     }
-    let hint = format!("{} → home ", app.state.home_key);
-    f.buffer_mut().set_line(header.x, header.y, &Line::from(spans), header.width.saturating_sub(hint.width() as u16 + 1));
-    put_right(f.buffer_mut(), header, header.y, vec![Span::styled(hint, Style::default().fg(T.dim))]);
+    let clock = utc_clock();
+    f.buffer_mut().set_line(header.x, header.y, &Line::from(spans), header.width.saturating_sub(clock.width() as u16 + 1));
+    put_right(f.buffer_mut(), header, header.y, vec![Span::styled(clock, Style::default().fg(T.dim))]);
     hline(f.buffer_mut(), area.y + 1, area);
     if let Some(a) = &mut app.attached {
         a.view.resize(pane.width, pane.height);
@@ -131,14 +131,37 @@ fn draw_header(buf: &mut Buffer, area: Rect, app: &App) {
             spans.push(Span::styled(format!("{n} {}", s.text()), st));
         }
     }
-    let right = match app.last_error.as_ref().or(app.notice.as_ref()) {
-        Some(e) => Span::styled(format!("{e} "), Style::default().fg(T.red)),
-        None => Span::styled(format!("{} ", app.health()), Style::default().fg(T.dim)),
+    let clock = utc_clock();
+    let note = match app.last_error.as_ref().or(app.notice.as_ref()) {
+        Some(e) => Span::styled(format!("{e}   "), Style::default().fg(T.red)),
+        None => match app.health() {
+            h if h.is_empty() => Span::raw(""),
+            h => Span::styled(format!("{h}   "), Style::default().fg(T.dim)),
+        },
     };
-    let right_w = right.content.width().min(area.width as usize / 2);
-    let right = Span::styled(right.content.chars().take(right_w).collect::<String>(), right.style);
+    let note_w = note.content.width().min((area.width as usize / 2).saturating_sub(clock.width()));
+    let note = Span::styled(note.content.chars().take(note_w).collect::<String>(), note.style);
+    let right_w = note.content.width() + clock.width();
     buf.set_line(area.x, area.y, &Line::from(spans), area.width.saturating_sub(right_w as u16 + 1));
-    put_right(buf, area, area.y, vec![right]);
+    put_right(buf, area, area.y, vec![note, Span::styled(clock, Style::default().fg(T.dim))]);
+}
+
+fn utc_clock() -> String {
+    let secs = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| d.as_secs() as i64);
+    let (days, rem) = (secs.div_euclid(86400), secs.rem_euclid(86400));
+    // Howard Hinnant's civil_from_days
+    let z = days + 719468;
+    let era = z.div_euclid(146097);
+    let doe = z - era * 146097;
+    let yoe = (doe - doe / 1460 + doe / 36524 - doe / 146096) / 365;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let d = doy - (153 * mp + 2) / 5 + 1;
+    let m = if mp < 10 { mp + 3 } else { mp - 9 };
+    let y = yoe + era * 400 + i64::from(m <= 2);
+    format!("{y:04}-{m:02}-{d:02} {:02}:{:02} UTC ", rem / 3600, rem % 3600 / 60)
 }
 
 fn plural(n: usize, w: &str) -> String {
