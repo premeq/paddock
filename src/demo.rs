@@ -18,6 +18,7 @@ fn pane(ws: &str, tab: &str, id: &str, cwd: &str, agent: Option<&str>, status: S
 }
 
 fn ws(id: &str, label: &str, tab: &str, path: &str, linked: bool) -> Workspace {
+    let repo = path.rsplit('/').nth(usize::from(linked)).unwrap_or("");
     Workspace {
         workspace_id: id.into(),
         label: label.into(),
@@ -25,7 +26,8 @@ fn ws(id: &str, label: &str, tab: &str, path: &str, linked: bool) -> Workspace {
         worktree: Some(Worktree {
             checkout_path: path.into(),
             is_linked_worktree: linked,
-            repo_name: path.rsplit('/').next().unwrap_or("").into(),
+            repo_name: repo.into(),
+            repo_key: format!("/home/alex/code/{repo}/.git"),
         }),
     }
 }
@@ -50,17 +52,25 @@ pub fn fleet() -> Vec<Machine> {
         workspaces: vec![
             ws("w1", "[1] shopfront", "t1", "/home/alex/code/shopfront", false),
             ws("w2", "[2] checkout-retry", "t1", "/home/alex/.herdr/worktrees/shopfront/checkout-retry", true),
+            ws("w3", "[3] search-facets", "t1", "/home/alex/.herdr/worktrees/shopfront/search-facets", true),
         ],
-        tabs: vec![tab("w1", "t1", "[1] claude", 1), tab("w1", "t2", "[2] zsh", 1), tab("w2", "t1", "[1] codex", 1)],
+        tabs: vec![
+            tab("w1", "t1", "[1] claude", 1),
+            tab("w1", "t2", "[2] zsh", 1),
+            tab("w2", "t1", "[1] codex", 1),
+            tab("w3", "t1", "[1] claude", 1),
+        ],
         panes: vec![
             pane("w1", "t1", "p1", "/home/alex/code/shopfront", Some("claude"), Status::Blocked, Some("Add retry to payment webhook"), true),
             pane("w1", "t2", "p2", "/home/alex/code/shopfront", None, Status::Unknown, Some("zsh"), false),
             pane("w2", "t1", "p3", "/home/alex/.herdr/worktrees/shopfront/checkout-retry", Some("codex"), Status::Working, Some("Flaky checkout test"), false),
+            pane("w3", "t1", "p4", "/home/alex/.herdr/worktrees/shopfront/search-facets", Some("claude"), Status::Idle, Some("Facet counts per category"), false),
         ],
         focused_pane_id: Some("w1:p1".into()),
     };
     local.git.insert("w1".into(), git("main", 0, 2));
     local.git.insert("w2".into(), git("checkout-retry", 3, 7));
+    local.git.insert("w3".into(), git("search-facets", 1, 0));
 
     let mut build = Machine::remote("m1".into(), "build-box".into(), "build-box".into(), "agents".into());
     build.link = Link::Online;

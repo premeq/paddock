@@ -6,7 +6,8 @@ agent and terminal on one screen; Enter drops you into any pane.
 ![paddock](docs/screenshot.png)
 
 - **Needs you** on top: blocked and done agents from every machine.
-- Tree of machines → spaces → panes with agent status, branch and path.
+- Tree of machines → spaces → panes with agent status, branch and path. Worktree
+  spaces sit under the space of their main checkout.
 - Detail panel: git state, agents and their topic, tabs, the pane's last lines.
 - Panes open inside paddock under a breadcrumb bar. `F12` brings you home.
 - Create spaces, worktrees and tabs. Rename, pin, close, delete checkouts.

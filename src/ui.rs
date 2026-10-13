@@ -265,11 +265,13 @@ fn draw_tree(buf: &mut Buffer, area: Rect, app: &mut App) {
             buf.set_style(rect, base);
         }
         let mut spans = Vec::new();
-        let indent = "  ".repeat(row.depth as usize);
-        spans.push(Span::raw(indent));
-        if row.depth == 2 {
-            let branch = if row.last_child { "└─ " } else { "├─ " };
-            spans.push(Span::styled(branch, if selected { base } else { base.fg(T.dim) }));
+        let guide = if selected { base } else { base.fg(T.dim) };
+        spans.push(Span::raw("  ".repeat(row.depth.min(2) as usize)));
+        if row.depth == 3 {
+            spans.push(Span::styled(if row.rail { "│  " } else { "   " }, guide));
+        }
+        if row.depth >= 2 {
+            spans.push(Span::styled(if row.last_child { "└─ " } else { "├─ " }, guide));
         }
         if row.current {
             spans.push(Span::styled("◆ ", base));

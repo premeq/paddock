@@ -48,6 +48,8 @@ pub struct Worktree {
     pub checkout_path: String,
     pub is_linked_worktree: bool,
     pub repo_name: String,
+    #[serde(default)]
+    pub repo_key: String,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -194,6 +196,7 @@ pub struct Row {
     pub status: Option<Status>,
     pub glyph: Option<&'static str>,
     pub last_child: bool,
+    pub rail: bool,
     pub current: bool,
     pub bold: bool,
     pub dimmed: bool,
@@ -301,7 +304,7 @@ pub fn build_rows(machines: &[Machine], query: &str, filter: Filter, home: &str,
     for m in machines {
         let dimmed = m.link != Link::Online;
         counts.workspaces += m.snapshot.workspaces.len();
-        let mut groups: Vec<(bool, Vec<Row>)> = Vec::new();
+        let mut groups: Vec<Group> = Vec::new();
         let mut agent_names: HashMap<&str, usize> = HashMap::new();
         for p in &m.snapshot.panes {
             if p.agent.is_some() {
@@ -379,6 +382,7 @@ pub fn build_rows(machines: &[Machine], query: &str, filter: Filter, home: &str,
                         status: kind.map(|_| p.agent_status),
                         glyph: None,
                         last_child: false,
+                        rail: false,
                         current: m.snapshot.focused_pane_id.as_deref() == Some(&p.pane_id),
                         bold: false,
                         dimmed,
@@ -392,6 +396,7 @@ pub fn build_rows(machines: &[Machine], query: &str, filter: Filter, home: &str,
                             depth: 1,
                             label: format!("{} / {} / {label}", m.label, ws.label),
                             last_child: false,
+                            rail: false,
                             current: false,
                             target: Target::Attention {
                                 machine: m.id.clone(),
@@ -420,9 +425,6 @@ pub fn build_rows(machines: &[Machine], query: &str, filter: Filter, home: &str,
                     right.push((g.branch.clone(), Tone::Dim));
                 }
             }
-            if ws.worktree.as_ref().is_some_and(|w| w.is_linked_worktree) {
-                right.push(((if right.is_empty() { "worktree" } else { " · worktree" }).into(), Tone::Dim));
-            }
             let mut group = Vec::new();
             group.push(Row {
                 depth: 1,
@@ -431,6 +433,7 @@ pub fn build_rows(machines: &[Machine], query: &str, filter: Filter, home: &str,
                 status: None,
                 glyph: None,
                 last_child: false,
+                rail: false,
                 current: false,
                 bold: true,
                 dimmed,
@@ -440,10 +443,14 @@ pub fn build_rows(machines: &[Machine], query: &str, filter: Filter, home: &str,
                 },
             });
             group.extend(children);
-            groups.push((is_pinned, group));
+            groups.push(Group {
+                pinned: is_pinned,
+                repo: ws.worktree.as_ref().map(|w| w.repo_key.clone()).filter(|k| !k.is_empty()),
+                linked: ws.worktree.as_ref().is_some_and(|w| w.is_linked_worktree),
+                rows: group,
+            });
         }
-        groups.sort_by_key(|(pinned, _)| !pinned);
-        let machine_rows: Vec<Row> = groups.into_iter().flat_map(|(_, g)| g).collect();
+        let machine_rows = nest(groups);
         if filtering && machine_rows.is_empty() && !matches(&words, &m.label) {
             continue;
         }
@@ -472,6 +479,7 @@ pub fn build_rows(machines: &[Machine], query: &str, filter: Filter, home: &str,
             status: None,
             glyph: None,
             last_child: false,
+            rail: false,
             current: false,
             bold: true,
             dimmed,
@@ -491,6 +499,7 @@ pub fn build_rows(machines: &[Machine], query: &str, filter: Filter, home: &str,
             status: None,
             glyph: None,
             last_child: false,
+            rail: false,
             current: false,
             bold: true,
             dimmed: false,
@@ -513,6 +522,7 @@ pub fn build_rows(machines: &[Machine], query: &str, filter: Filter, home: &str,
                 status: None,
                 glyph: Some("+"),
                 last_child: false,
+                rail: false,
                 current: false,
                 bold: false,
                 dimmed: false,
@@ -523,6 +533,58 @@ pub fn build_rows(machines: &[Machine], query: &str, filter: Filter, home: &str,
     Rows { rows: out, counts }
 }
 
+struct Group {
+    pinned: bool,
+    repo: Option<String>,
+    linked: bool,
+    rows: Vec<Row>,
+}
+
+/// Orders spaces pinned first and moves each linked worktree under the first
+/// main checkout of its repo. Worktrees without one stay top level, tagged.
+fn nest(mut groups: Vec<Group>) -> Vec<Row> {
+    groups.sort_by_key(|g| !g.pinned);
+    let parent: Vec<Option<usize>> = groups
+        .iter()
+        .map(|g| {
+            g.linked
+                .then(|| groups.iter().position(|r| !r.linked && r.repo.is_some() && r.repo == g.repo))
+                .flatten()
+        })
+        .collect();
+    let mut out = Vec::new();
+    for i in 0..groups.len() {
+        if parent[i].is_some() {
+            continue;
+        }
+        let kids: Vec<usize> = (0..groups.len()).filter(|&j| parent[j] == Some(i)).collect();
+        let mut rows = std::mem::take(&mut groups[i].rows);
+        if groups[i].linked {
+            let right = &mut rows[0].right;
+            right.push(((if right.is_empty() { "worktree" } else { " · worktree" }).into(), Tone::Dim));
+        }
+        if !kids.is_empty() {
+            if let Some(last) = rows.last_mut().filter(|r| r.depth == 2) {
+                last.last_child = false;
+            }
+        }
+        out.extend(rows);
+        for (ix, &k) in kids.iter().enumerate() {
+            let last = ix + 1 == kids.len();
+            for mut r in std::mem::take(&mut groups[k].rows) {
+                r.depth += 1;
+                if r.depth == 2 {
+                    r.last_child = last;
+                } else {
+                    r.rail = !last;
+                }
+                out.push(r);
+            }
+        }
+    }
+    out
+}
+
 fn spacer(n: u8) -> Row {
     Row {
         depth: 0,
@@ -531,6 +593,7 @@ fn spacer(n: u8) -> Row {
         status: None,
         glyph: None,
         last_child: false,
+        rail: false,
         current: false,
         bold: false,
         dimmed: false,
@@ -541,5 +604,34 @@ fn spacer(n: u8) -> Row {
 impl Row {
     pub fn selectable(&self) -> bool {
         !matches!(self.target, Target::Separator(_))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn worktrees_nest_under_their_main_checkout() {
+        let rows = build_rows(&crate::demo::fleet(), "", Filter::All, "/home/alex", &[]).rows;
+        let tree: Vec<(u8, bool, bool, &str)> = rows
+            .iter()
+            .skip_while(|r| r.label != "Local")
+            .take(7)
+            .map(|r| (r.depth, r.last_child, r.rail, r.label.as_str()))
+            .collect();
+        assert_eq!(
+            tree,
+            [
+                (0, false, false, "Local"),
+                (1, false, false, "[1] shopfront"),
+                (2, false, false, "[1] claude"),
+                (2, false, false, "[2] zsh"),
+                (2, false, false, "[2] checkout-retry"),
+                (3, true, true, "[1] codex"),
+                (2, true, false, "[3] search-facets"),
+            ]
+        );
+        assert_eq!(rows.iter().filter(|r| r.right.iter().any(|(t, _)| t.contains("worktree"))).count(), 0);
     }
 }
