@@ -81,10 +81,6 @@ settings live in `~/.config/paddock/state.json`.
 Limits: opening a pane resizes it to paddock's viewport, like any herdr
 client. herdr's own TUI does not follow paddock's selection.
 
-## Zed
-
-Command palette → **workspace: new center terminal**, then `paddock`.
-
 ## Credits
 
 The ANSI grid parser is ported from
