@@ -54,6 +54,7 @@ description = "paddock"
 | `n` `m` | new space, connect machine |
 | `t` `c` `r` `p` `x` `D` | new worktree, new tab, rename, pin, close, delete checkout |
 | `F12` | in a pane: back home |
+| `q` | quit |
 
 The home key is `F12` by default. Change it in `~/.config/paddock/state.json`:
 
@@ -65,9 +66,9 @@ Accepted forms: `f1`..`f24`, `esc`, `space`, or one character, each with
 optional `ctrl`, `alt`, `shift`. Pick a key the programs in your panes don't
 need; paddock takes it before they see it. On macOS, F-keys need "Use F1, F2,
 etc. keys as standard function keys" or the fn modifier.
-| `q` | quit |
 
-Mouse: click selects, click again opens, wheel scrolls.
+Mouse: click selects, click again opens, wheel scrolls. In a pane, drag
+copies text; drags are not passed to the pane's program.
 
 ## How it works
 

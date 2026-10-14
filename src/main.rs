@@ -8,10 +8,13 @@ mod state;
 mod theme;
 mod ui;
 
-use std::process::Command;
+use std::io::Write;
+use std::process::{Command, Stdio};
 use std::time::Duration;
 
 use anyhow::{Context, Result};
+use base64::engine::general_purpose::STANDARD as B64;
+use base64::Engine;
 use ratatui::crossterm::event::{
     self, DisableBracketedPaste, DisableMouseCapture, EnableBracketedPaste, EnableMouseCapture, Event, KeyEventKind,
 };
@@ -49,6 +52,19 @@ fn restore() {
     ratatui::restore();
 }
 
+/// OSC 52 reaches the clipboard through most terminals and SSH; pbcopy covers
+/// macOS terminals that ignore it.
+fn copy(text: &str) {
+    let mut out = std::io::stdout();
+    let _ = write!(out, "\x1b]52;c;{}\x07", B64.encode(text)).and_then(|_| out.flush());
+    if cfg!(target_os = "macos") {
+        if let Ok(mut child) = Command::new("pbcopy").stdin(Stdio::piped()).spawn() {
+            let _ = child.stdin.take().map(|mut i| i.write_all(text.as_bytes()));
+            let _ = child.wait();
+        }
+    }
+}
+
 fn arg_secs(flag: &str) -> Option<f64> {
     let args: Vec<String> = std::env::args().collect();
     let i = args.iter().position(|a| a == flag)?;
@@ -72,6 +88,7 @@ fn run(terminal: &mut DefaultTerminal, app: &mut App) -> Result<()> {
         match effect {
             Effect::None => {}
             Effect::Quit => return Ok(()),
+            Effect::Copy(text) => copy(&text),
             Effect::Exec(argv) => {
                 restore();
                 let status = Command::new(&argv[0])

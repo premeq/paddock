@@ -51,6 +51,7 @@ pub enum Effect {
     Quit,
     /// Suspend the TUI, run this argv on the user's terminal, resume.
     Exec(Vec<String>),
+    Copy(String),
 }
 
 pub struct App {
@@ -549,8 +550,7 @@ impl App {
 
     pub fn mouse(&mut self, m: MouseEvent) -> Effect {
         if let Some(a) = &mut self.attached {
-            a.view.mouse(m, (0, 2));
-            return Effect::None;
+            return a.view.mouse(m, (0, 2)).map_or(Effect::None, Effect::Copy);
         }
         if self.notice.is_some() {
             if matches!(m.kind, MouseEventKind::Down(_)) {

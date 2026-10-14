@@ -30,6 +30,9 @@ pub struct PaneView {
     cols: u16,
     rows: u16,
     closed: Option<String>,
+    press: Option<(u16, u16)>,
+    /// Drag selection as (anchor, head), each (column, row) in the grid.
+    selection: Option<((u16, u16), (u16, u16))>,
 }
 
 enum Msg {
@@ -71,7 +74,7 @@ impl PaneView {
         let stderr = child.stderr.take().context("no stderr")?;
         let (tx, rx) = mpsc::channel();
         std::thread::spawn(move || read_stream(stdout, stderr, tx));
-        Ok(PaneView { stdin: child.stdin.take(), child, rx, grid: Grid::default(), cols, rows, closed: None })
+        Ok(PaneView { stdin: child.stdin.take(), child, rx, grid: Grid::default(), cols, rows, closed: None, press: None, selection: None })
     }
 
     pub fn pump(&mut self) -> bool {
@@ -80,6 +83,9 @@ impl PaneView {
             changed = true;
             match msg {
                 Msg::Frame { ansi, full, width, height } => {
+                    if (usize::from(width), usize::from(height)) != (self.grid.width, self.grid.height) {
+                        (self.press, self.selection) = (None, None);
+                    }
                     self.grid.resize(width.into(), height.into());
                     if full {
                         self.grid.clear();
@@ -107,6 +113,7 @@ impl PaneView {
     }
 
     pub fn key(&mut self, key: KeyEvent) {
+        self.selection = None;
         if key.modifiers.is_empty() && matches!(key.code, KeyCode::PageUp | KeyCode::PageDown) {
             let direction = if key.code == KeyCode::PageUp { "up" } else { "down" };
             let lines = self.rows.saturating_sub(1).max(1);
@@ -123,13 +130,35 @@ impl PaneView {
         self.input(format!("\x1b[200~{text}\x1b[201~").as_bytes());
     }
 
-    pub fn mouse(&mut self, ev: MouseEvent, origin: (u16, u16)) {
-        let (Some(column), Some(row)) = (ev.column.checked_sub(origin.0), ev.row.checked_sub(origin.1))
-        else {
-            return;
+    /// Forwards mouse input to the pane, except left drags, which select text.
+    /// Returns the selected text when a drag ends.
+    pub fn mouse(&mut self, ev: MouseEvent, origin: (u16, u16)) -> Option<String> {
+        let (w, h) = (self.grid.width as u16, self.grid.height as u16);
+        if w == 0 || h == 0 {
+            return None;
+        }
+        let (Some(column), Some(row)) = (ev.column.checked_sub(origin.0), ev.row.checked_sub(origin.1)) else {
+            return None;
         };
-        if usize::from(column) >= self.grid.width || usize::from(row) >= self.grid.height {
-            return;
+        let head = (column.min(w - 1), row.min(h - 1));
+        let mut copied = None;
+        match ev.kind {
+            MouseEventKind::Drag(MouseButton::Left) => {
+                self.selection = self.press.map(|anchor| (anchor, head));
+                return None;
+            }
+            MouseEventKind::Up(MouseButton::Left) => {
+                self.press = None;
+                copied = self.selection.map(|s| self.grid.text(s));
+            }
+            MouseEventKind::Down(b) if column < w && row < h => {
+                self.selection = None;
+                self.press = (b == MouseButton::Left).then_some(head);
+            }
+            _ => {}
+        }
+        if column >= w || row >= h {
+            return copied;
         }
         let modifiers = ev.modifiers.bits() & 0b111;
         let (action, button) = match ev.kind {
@@ -137,13 +166,13 @@ impl PaneView {
                 let direction = if ev.kind == MouseEventKind::ScrollUp { "up" } else { "down" };
                 self.send(json!({"type": "terminal.scroll", "direction": direction, "lines": WHEEL_LINES,
                     "source": "wheel", "column": column, "row": row, "modifiers": modifiers}));
-                return;
+                return copied;
             }
             MouseEventKind::Down(b) => ("down", b),
             MouseEventKind::Up(b) => ("up", b),
             MouseEventKind::Drag(b) => ("drag", b),
             MouseEventKind::Moved => ("move", MouseButton::Left),
-            _ => return,
+            _ => return copied,
         };
         let button = match button {
             MouseButton::Left => "left",
@@ -152,10 +181,22 @@ impl PaneView {
         };
         self.send(json!({"type": "terminal.mouse", "action": action, "button": button,
             "column": column, "row": row, "modifiers": modifiers}));
+        copied
     }
 
     pub fn render(&self, area: Rect, buf: &mut Buffer) {
         self.grid.render(area, buf);
+        let Some((start, end)) = self.selection.map(ordered) else {
+            return;
+        };
+        for y in start.0..=end.0 {
+            let (from, to) = line_span(start, end, y, self.grid.width);
+            for x in from..=to {
+                if x < area.width.into() && y < area.height.into() {
+                    buf[(area.x + x as u16, area.y + y as u16)].modifier.insert(Modifier::REVERSED);
+                }
+            }
+        }
     }
 
     pub fn cursor(&self, area: Rect) -> Option<(u16, u16)> {
@@ -454,12 +495,37 @@ impl Grid {
         }
     }
 
+    fn text(&self, selection: ((u16, u16), (u16, u16))) -> String {
+        let (start, end) = ordered(selection);
+        (start.0..=end.0)
+            .map(|y| {
+                let (from, to) = line_span(start, end, y, self.width);
+                let row = &self.cells[y * self.width..][from..=to];
+                row.iter().map(|c| c.sym.as_str()).collect::<String>().trim_end().to_owned()
+            })
+            .collect::<Vec<_>>()
+            .join("\n")
+    }
+
     fn text_lines(&self) -> Vec<String> {
         self.cells
             .chunks(self.width.max(1))
             .map(|r| r.iter().map(|c| c.sym.as_str()).collect::<String>().trim_end().to_owned())
             .collect()
     }
+}
+
+/// Selection ends as (row, column), in reading order.
+fn ordered(((ax, ay), (bx, by)): ((u16, u16), (u16, u16))) -> ((usize, usize), (usize, usize)) {
+    let (a, b) = ((ay.into(), ax.into()), (by.into(), bx.into()));
+    if a <= b { (a, b) } else { (b, a) }
+}
+
+/// Columns of row `y` covered by a selection, inclusive.
+fn line_span(start: (usize, usize), end: (usize, usize), y: usize, width: usize) -> (usize, usize) {
+    let from = if y == start.0 { start.1 } else { 0 };
+    let to = if y == end.0 { end.1 } else { width - 1 };
+    (from, to)
 }
 
 /// CSI: ESC [ params(0x30-0x3F)* intermediates(0x20-0x2F)* final(0x40-0x7E).
@@ -652,6 +718,16 @@ mod tests {
         let mut buf = Buffer::empty(Rect::new(0, 0, 2, 1));
         g.render(Rect::new(0, 0, 2, 5), &mut buf);
         assert_eq!(buf, Buffer::with_lines(["x "]));
+    }
+
+    #[test]
+    fn selects_text_in_reading_order() {
+        let mut g = Grid::default();
+        g.resize(6, 3);
+        g.apply("\x1b[1;1Habc\x1b[2;1Hdef  g\x1b[3;1Hhi");
+        assert_eq!(g.text(((1, 0), (1, 0))), "b");
+        assert_eq!(g.text(((1, 2), (2, 0))), "c\ndef  g\nhi");
+        assert_eq!(g.text(((0, 1), (3, 1))), "def");
     }
 
     #[test]
