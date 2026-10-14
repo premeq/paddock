@@ -624,12 +624,12 @@ mod tests {
             tree,
             [
                 (0, false, false, "Local"),
-                (1, false, false, "[1] shopfront"),
-                (2, false, false, "[1] claude"),
-                (2, false, false, "[2] zsh"),
-                (2, false, false, "[2] checkout-retry"),
-                (3, true, true, "[1] codex"),
-                (2, true, false, "[3] search-facets"),
+                (1, false, false, "shopfront"),
+                (2, false, false, "claude"),
+                (2, false, false, "zsh"),
+                (2, false, false, "checkout-retry"),
+                (3, true, true, "codex"),
+                (2, true, false, "search-facets"),
             ]
         );
         assert_eq!(rows.iter().filter(|r| r.right.iter().any(|(t, _)| t.contains("worktree"))).count(), 0);

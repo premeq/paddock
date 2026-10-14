@@ -50,15 +50,15 @@ pub fn fleet() -> Vec<Machine> {
     local.link = Link::Online;
     local.snapshot = Snapshot {
         workspaces: vec![
-            ws("w1", "[1] shopfront", "t1", "/home/alex/code/shopfront", false),
-            ws("w2", "[2] checkout-retry", "t1", "/home/alex/.herdr/worktrees/shopfront/checkout-retry", true),
-            ws("w3", "[3] search-facets", "t1", "/home/alex/.herdr/worktrees/shopfront/search-facets", true),
+            ws("w1", "shopfront", "t1", "/home/alex/code/shopfront", false),
+            ws("w2", "checkout-retry", "t1", "/home/alex/.herdr/worktrees/shopfront/checkout-retry", true),
+            ws("w3", "search-facets", "t1", "/home/alex/.herdr/worktrees/shopfront/search-facets", true),
         ],
         tabs: vec![
-            tab("w1", "t1", "[1] claude", 1),
-            tab("w1", "t2", "[2] zsh", 1),
-            tab("w2", "t1", "[1] codex", 1),
-            tab("w3", "t1", "[1] claude", 1),
+            tab("w1", "t1", "claude", 1),
+            tab("w1", "t2", "zsh", 1),
+            tab("w2", "t1", "codex", 1),
+            tab("w3", "t1", "claude", 1),
         ],
         panes: vec![
             pane("w1", "t1", "p1", "/home/alex/code/shopfront", Some("claude"), Status::Blocked, Some("Add retry to payment webhook"), true),
@@ -76,8 +76,8 @@ pub fn fleet() -> Vec<Machine> {
     build.link = Link::Online;
     build.latency_ms = Some(18);
     build.snapshot = Snapshot {
-        workspaces: vec![ws("w1", "[1] infra", "t1", "/home/alex/infra", false), ws("w2", "[2] docs", "t1", "/home/alex/docs", false)],
-        tabs: vec![tab("w1", "t1", "[1] claude", 1), tab("w2", "t1", "[1] zsh", 1)],
+        workspaces: vec![ws("w1", "infra", "t1", "/home/alex/infra", false), ws("w2", "docs", "t1", "/home/alex/docs", false)],
+        tabs: vec![tab("w1", "t1", "claude", 1), tab("w2", "t1", "zsh", 1)],
         panes: vec![
             pane("w1", "t1", "p1", "/home/alex/infra", Some("claude"), Status::Done, Some("Rotate TLS certificates"), true),
             pane("w2", "t1", "p2", "/home/alex/docs", None, Status::Unknown, Some("zsh"), false),
@@ -91,8 +91,8 @@ pub fn fleet() -> Vec<Machine> {
     lab.link = Link::Online;
     lab.latency_ms = Some(41);
     lab.snapshot = Snapshot {
-        workspaces: vec![ws("w1", "[1] ranker", "t1", "/home/alex/ranker", false)],
-        tabs: vec![tab("w1", "t1", "[1] claude", 2)],
+        workspaces: vec![ws("w1", "ranker", "t1", "/home/alex/ranker", false)],
+        tabs: vec![tab("w1", "t1", "claude", 2)],
         panes: vec![
             pane("w1", "t1", "p1", "/home/alex/ranker", Some("claude"), Status::Idle, Some("Evaluate ranker v3"), true),
             pane("w1", "t1", "p2", "/home/alex/ranker", None, Status::Unknown, Some("zsh"), false),
